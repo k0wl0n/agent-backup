@@ -1,0 +1,27 @@
+agent:
+  name: "staging-agent-01"
+  api_key: "your-api-key-here"
+  # server_url is hardcoded (default: http://localhost:8000)
+  log_file: "agent.log"
+
+gateway:
+  enabled: true # Enable polling mode (firewall friendly)
+
+storage:
+  target_folder: "./backups" # Local folder to store dumps
+  retention_days: 7
+  
+  # Optional: S3 Configuration
+  # s3:
+  #   bucket: "my-backup-bucket"
+  #   region: "us-east-1"
+  #   access_key_id: "..."
+  #   secret_access_key: "..."
+
+  # Optional: GCS Configuration
+  # gcs:
+  #   credentials_file: "/path/to/service-account.json"
+
+database:
+  # Default local database to backup if not specified in task
+  url: "postgres://user:pass@localhost:5432/dbname"

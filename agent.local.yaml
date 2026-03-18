@@ -1,0 +1,11 @@
+agent:
+  api_key: "local-dev-key"
+  # server_url: "http://localhost:8000" (Default)
+  name: "local-agent-01"
+
+gateway:
+  enabled: true
+
+storage:
+  target_folder: "./backups"
+  retention_days: 1
