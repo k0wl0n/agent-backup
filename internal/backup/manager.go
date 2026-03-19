@@ -80,7 +80,7 @@ type BackupDefinition struct {
 	PlatformS3Path    string `json:"platform_s3_path,omitempty"`
 
 	// ByocStorageConfig holds decrypted BYOC credentials when the backup uses
-	// a user-supplied storage backend instead of the platform R2.
+	// a user-supplied storage backend instead of the platform storage.
 	ByocStorageConfig *ByocStorageConfig `json:"byoc_storage_config,omitempty"`
 }
 
@@ -480,7 +480,7 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 			if err := platformUpload(ctx, def.PlatformUploadURL, localPath, logFn); err != nil {
 				logFn("error", "Storage", fmt.Sprintf("Platform upload failed: %v", err))
 				log.Printf("[backup] Platform upload failed for %s: %v", def.Name, err)
-				return nil, fmt.Errorf("platform R2 upload failed: %w", err)
+				return nil, fmt.Errorf("platform storage upload failed: %w", err)
 			}
 			result.S3Path = def.PlatformS3Path
 			logFn("info", "Storage", fmt.Sprintf("Uploaded to platform → %s", def.PlatformS3Path))
@@ -602,7 +602,7 @@ func platformUpload(ctx context.Context, presignedURL, localPath string, logFn f
 		// header without including it in the presigned SignedHeaders causes R2/S3 to
 		// return 403 SignatureDoesNotMatch.
 
-		logFn("info", "Storage", fmt.Sprintf("PUT %d bytes → platform R2", fileSize))
+		logFn("info", "Storage", fmt.Sprintf("PUT %d bytes → platform storage", fileSize))
 		resp, err := storageHTTPClient.Do(req)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("http PUT: %w", err)
