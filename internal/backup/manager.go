@@ -574,33 +574,24 @@ func encryptBackupFile(srcPath, keyHex string) (string, error) {
 // so the agent never needs R2 credentials.
 // Retries up to 3 times with exponential backoff for transient 5xx errors.
 func platformUpload(ctx context.Context, presignedURL, localPath string, logFn func(level, component, message string)) error {
-	f, err := os.Open(localPath)
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-
-	fi, err := f.Stat()
+	fi, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("stat file: %w", err)
 	}
 	fileSize := fi.Size()
 
 	_, retryErr := backoff.Retry(ctx, func() (struct{}, error) {
-		// Seek back to the start for each retry attempt
-		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
-			return struct{}{}, backoff.Permanent(fmt.Errorf("seek: %w", seekErr))
+		f, err := os.Open(localPath)
+		if err != nil {
+			return struct{}{}, backoff.Permanent(fmt.Errorf("open file: %w", err))
 		}
+		defer f.Close()
 
 		req, err := http.NewRequestWithContext(ctx, "PUT", presignedURL, f)
 		if err != nil {
 			return struct{}{}, backoff.Permanent(fmt.Errorf("build request: %w", err))
 		}
 		req.ContentLength = fileSize
-		// Do NOT set x-amz-content-sha256 here. The presigned URL already encodes
-		// "UNSIGNED-PAYLOAD" as the body hash in its canonical request. Sending this
-		// header without including it in the presigned SignedHeaders causes R2/S3 to
-		// return 403 SignatureDoesNotMatch.
 
 		logFn("info", "Storage", fmt.Sprintf("PUT %d bytes → platform storage", fileSize))
 		resp, err := storageHTTPClient.Do(req)
@@ -612,7 +603,6 @@ func platformUpload(ctx context.Context, presignedURL, localPath string, logFn f
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 			errMsg := fmt.Errorf("platform upload returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-			// 4xx errors are permanent — no point retrying
 			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 				return struct{}{}, backoff.Permanent(errMsg)
 			}
