@@ -22,6 +22,11 @@ type Client struct {
 	AgentID    string
 }
 
+type HeartbeatResponse struct {
+	Status        string  `json:"status"`
+	UpdateVersion *string `json:"update_version,omitempty"`
+}
+
 // ErrRevoked is returned by any client call that receives 401 or 403.
 // The agent should treat this as a permanent termination signal.
 var ErrRevoked = fmt.Errorf("agent revoked: API key rejected by server")
@@ -134,12 +139,13 @@ func (c *Client) Register() error {
 	return nil
 }
 
-func (c *Client) SendHeartbeat() error {
+func (c *Client) SendHeartbeat() (*HeartbeatResponse, error) {
 	if c.AgentID == "" {
-		return fmt.Errorf("agent not registered")
+		return nil, fmt.Errorf("agent not registered")
 	}
 
-	return retryableCall(context.Background(), func() error {
+	var hbResp *HeartbeatResponse
+	err := retryableCall(context.Background(), func() error {
 		req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/api/v1/agent/heartbeat", nil)
 		if err != nil {
 			return err
@@ -159,8 +165,17 @@ func (c *Client) SendHeartbeat() error {
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("heartbeat failed: %s", resp.Status)
 		}
+
+		// Parse JSON response
+		var response HeartbeatResponse
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			// Backward compatibility: if response is not JSON, treat as success
+			return nil
+		}
+		hbResp = &response
 		return nil
 	})
+	return hbResp, err
 }
 
 func (c *Client) PollTask() (*Task, error) {

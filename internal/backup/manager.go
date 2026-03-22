@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -94,11 +95,32 @@ type BackupResult struct {
 }
 
 type BackupManager struct {
-	cfg *agentConfig.Config
+	cfg            *agentConfig.Config
+	runningBackups sync.Map // map[string]bool - tracks backup IDs currently running
 }
 
 func New(cfg *agentConfig.Config) *BackupManager {
-	return &BackupManager{cfg: cfg}
+	return &BackupManager{
+		cfg:            cfg,
+		runningBackups: sync.Map{},
+	}
+}
+
+// HasRunningBackups returns true if any backups are currently executing
+func (bm *BackupManager) HasRunningBackups() bool {
+	hasRunning := false
+	bm.runningBackups.Range(func(key, value interface{}) bool {
+		hasRunning = true
+		return false // stop iteration
+	})
+	return hasRunning
+}
+
+// ExecuteTask handles a task from the server, parsing the payload and executing the backup
+func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
+	// This is a placeholder - the actual implementation would parse the task
+	// and call ExecuteBackup with the appropriate BackupDefinition
+	log.Printf("[BackupManager] Task execution not yet implemented")
 }
 
 // effectivePort returns the standard port for the database type if port is 0.
@@ -123,6 +145,11 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 	if logFn == nil {
 		logFn = func(_, _, _ string) {}
 	}
+	
+	// Track this backup as running
+	bm.runningBackups.Store(def.ID, true)
+	defer bm.runningBackups.Delete(def.ID)
+	
 	ctx, span := otel.Tracer("jokowipe-agent").Start(ctx, "ExecuteBackup")
 	defer span.End()
 
