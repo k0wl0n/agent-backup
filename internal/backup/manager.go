@@ -690,10 +690,10 @@ func platformUpload(ctx context.Context, presignedURL, localPath string, logFn f
 // =============================================================================
 
 // uploadWithByocConfig uploads the backup file to the BYOC storage specified in
-// the task payload. It supports s3, r2 (S3-compatible), azure, and gcs backends.
+// the task payload. It supports s3, r2, and gcs (all S3-compatible), plus azure.
 func uploadWithByocConfig(ctx context.Context, byoc *ByocStorageConfig, localPath, objectKey string) (string, error) {
 	switch strings.ToLower(byoc.Type) {
-	case "s3", "r2":
+	case "s3", "r2", "gcs":
 		var cfg agentConfig.S3Config
 		if err := json.Unmarshal(byoc.Config, &cfg); err != nil {
 			return "", fmt.Errorf("parse S3/R2 config: %w", err)
@@ -709,44 +709,6 @@ func uploadWithByocConfig(ctx context.Context, byoc *ByocStorageConfig, localPat
 			return "", fmt.Errorf("parse Azure config: %w", err)
 		}
 		return uploadToAzure(ctx, &cfg, localPath, objectKey)
-	case "gcs":
-		// GCS requires a credentials file path; write inline credentials_json to
-		// a temporary file and pass it to uploadToGCS.
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(byoc.Config, &raw); err != nil {
-			return "", fmt.Errorf("parse GCS config: %w", err)
-		}
-		var bucket string
-		if b, ok := raw["bucket"]; ok {
-			_ = json.Unmarshal(b, &bucket)
-		}
-		if bucket == "" {
-			return "", fmt.Errorf("GCS config missing bucket")
-		}
-		credJSON, ok := raw["credentials_json"]
-		if !ok {
-			return "", fmt.Errorf("GCS config missing credentials_json")
-		}
-		// Unescape the JSON string value to get the raw service-account JSON.
-		var credStr string
-		if err := json.Unmarshal(credJSON, &credStr); err != nil {
-			return "", fmt.Errorf("parse GCS credentials_json: %w", err)
-		}
-		tmpFile, err := os.CreateTemp("", "gcs-creds-*.json")
-		if err != nil {
-			return "", fmt.Errorf("create temp credentials file: %w", err)
-		}
-		defer os.Remove(tmpFile.Name())
-		if _, err := tmpFile.WriteString(credStr); err != nil {
-			tmpFile.Close()
-			return "", fmt.Errorf("write credentials file: %w", err)
-		}
-		tmpFile.Close()
-		cfg := &agentConfig.GCSConfig{
-			CredentialsFile: tmpFile.Name(),
-			Bucket:          bucket,
-		}
-		return uploadToGCS(ctx, cfg, localPath, objectKey)
 	default:
 		return "", fmt.Errorf("unsupported BYOC storage type: %s", byoc.Type)
 	}
