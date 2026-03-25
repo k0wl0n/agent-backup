@@ -10,11 +10,11 @@ import (
 
 // S3Config holds Amazon S3 (or S3-compatible) credentials.
 type S3Config struct {
-	AccessKeyID     string `yaml:"access_key_id"`
-	SecretAccessKey string `yaml:"secret_access_key"`
-	Region          string `yaml:"region"`
-	Endpoint        string `yaml:"endpoint"`
-	Bucket          string `yaml:"bucket"`
+	AccessKeyID     string `yaml:"access_key_id" json:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key" json:"secret_access_key"`
+	Region          string `yaml:"region" json:"region"`
+	Endpoint        string `yaml:"endpoint" json:"endpoint"`
+	Bucket          string `yaml:"bucket" json:"bucket"`
 }
 
 // GCSConfig holds Google Cloud Storage credentials.
