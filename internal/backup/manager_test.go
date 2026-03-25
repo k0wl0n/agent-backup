@@ -10,7 +10,7 @@ import (
 
 func TestExecuteBackup_InvalidConfig(t *testing.T) {
 	cfg := &agentConfig.Config{}
-	bm := New(cfg)
+	bm := New(cfg, nil)
 
 	// Invalid JSON
 	def := BackupDefinition{
@@ -25,7 +25,7 @@ func TestExecuteBackup_InvalidConfig(t *testing.T) {
 
 func TestExecuteBackup_UnsupportedType(t *testing.T) {
 	cfg := &agentConfig.Config{}
-	bm := New(cfg)
+	bm := New(cfg, nil)
 
 	source := SourceConfig{Type: "oracle"}
 	sourceJSON, _ := json.Marshal(source)

@@ -29,6 +29,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	agentConfig "github.com/k0wl0n/agent-backup/internal/config"
+	"github.com/k0wl0n/agent-backup/internal/client"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -96,12 +97,14 @@ type BackupResult struct {
 
 type BackupManager struct {
 	cfg            *agentConfig.Config
+	client         *client.Client
 	runningBackups sync.Map // map[string]bool - tracks backup IDs currently running
 }
 
-func New(cfg *agentConfig.Config) *BackupManager {
+func New(cfg *agentConfig.Config, c *client.Client) *BackupManager {
 	return &BackupManager{
 		cfg:            cfg,
+		client:         c,
 		runningBackups: sync.Map{},
 	}
 }
@@ -116,11 +119,43 @@ func (bm *BackupManager) HasRunningBackups() bool {
 	return hasRunning
 }
 
-// ExecuteTask handles a task from the server, parsing the payload and executing the backup
+// ExecuteTask handles a task from the server: parses the payload as BackupDefinition,
+// runs ExecuteBackup, and submits the result (success or failure) via SubmitTaskResult.
 func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
-	// This is a placeholder - the actual implementation would parse the task
-	// and call ExecuteBackup with the appropriate BackupDefinition
-	log.Printf("[BackupManager] Task execution not yet implemented")
+	t, ok := task.(*client.Task)
+	if !ok {
+		log.Printf("[BackupManager] ExecuteTask: unexpected task type %T", task)
+		return
+	}
+
+	var def BackupDefinition
+	if err := json.Unmarshal(t.Payload, &def); err != nil {
+		log.Printf("[BackupManager] ExecuteTask: failed to parse payload for task %s: %v", t.ID, err)
+		if submitErr := bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("failed to parse task payload: %v", err), 0, 0); submitErr != nil {
+			log.Printf("[BackupManager] ExecuteTask: failed to submit parse error for task %s: %v", t.ID, submitErr)
+		}
+		return
+	}
+
+	logFn := func(level, component, message string) {
+		log.Printf("[%s][%s] %s", strings.ToUpper(level), component, message)
+	}
+
+	result, err := bm.ExecuteBackup(ctx, def, logFn)
+	if err != nil {
+		// Infrastructure error (not a task-level failure) — still submit so backend knows
+		errMsg := fmt.Sprintf("backup infrastructure error: %v", err)
+		log.Printf("[BackupManager] ExecuteTask: infrastructure error for task %s: %v", t.ID, err)
+		if submitErr := bm.client.SubmitTaskResult(t.ID, nil, errMsg, 0, 0); submitErr != nil {
+			log.Printf("[BackupManager] ExecuteTask: failed to submit error for task %s: %v", t.ID, submitErr)
+		}
+		return
+	}
+
+	// Submit result — result.ErrorMsg is non-empty for failed backups (including BYOC failures)
+	if submitErr := bm.client.SubmitTaskResult(t.ID, result, result.ErrorMsg, result.Size, result.Duration.Milliseconds()); submitErr != nil {
+		log.Printf("[BackupManager] ExecuteTask: failed to submit result for task %s: %v", t.ID, submitErr)
+	}
 }
 
 // effectivePort returns the standard port for the database type if port is 0.
@@ -449,12 +484,17 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		logFn("info", "Storage", fmt.Sprintf("Uploading to BYOC storage (%s)", def.ByocStorageConfig.Type))
 		cloudPath, err := uploadWithByocConfig(ctx, def.ByocStorageConfig, localPath, objectKey)
 		if err != nil {
-			logFn("warn", "Storage", fmt.Sprintf("BYOC upload failed: %v", err))
-			log.Printf("[backup] BYOC upload failed for %s: %v", def.Name, err)
-		} else {
-			result.S3Path = cloudPath
-			logFn("info", "Storage", fmt.Sprintf("Uploaded → %s", cloudPath))
+			errMsg := fmt.Sprintf("BYOC upload to %s storage failed: %v", def.ByocStorageConfig.Type, err)
+			logFn("error", "Storage", errMsg)
+			log.Printf("[backup] %s (backup: %s)", errMsg, def.Name)
+			result.Status = "failed"
+			result.ErrorMsg = errMsg
+			// Return the failed result immediately — do not continue to success path.
+			// ExecuteTask reads result.ErrorMsg and submits it to the backend via SubmitTaskResult.
+			return result, nil
 		}
+		result.S3Path = cloudPath
+		logFn("info", "Storage", fmt.Sprintf("Uploaded → %s", cloudPath))
 	} else {
 		// No BYOC — use the agent's local storage config (if set) and the platform presigned URL.
 
