@@ -54,6 +54,7 @@ type SourceConfig struct {
 // The backend fetches and decrypts the user's stored StorageConfig and embeds it here
 // so the agent can upload directly to the user's own storage bucket.
 type ByocStorageConfig struct {
+	Name   string          `json:"name"`
 	Type   string          `json:"type"`
 	Config json.RawMessage `json:"config"`
 }
@@ -481,10 +482,14 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 	// When the task payload includes BYOC credentials, use them for upload.
 	// This takes priority over the agent's local storage config.
 	if def.ByocStorageConfig != nil {
-		logFn("info", "Storage", fmt.Sprintf("Uploading to BYOC storage (%s)", def.ByocStorageConfig.Type))
+		logFn("info", "Storage", fmt.Sprintf("Uploading to BYOC storage '%s' (%s)", def.ByocStorageConfig.Name, def.ByocStorageConfig.Type))
 		cloudPath, err := uploadWithByocConfig(ctx, def.ByocStorageConfig, localPath, objectKey)
 		if err != nil {
-			errMsg := fmt.Sprintf("BYOC upload to %s storage failed: %v", def.ByocStorageConfig.Type, err)
+			storageName := def.ByocStorageConfig.Name
+			if storageName == "" {
+				storageName = def.ByocStorageConfig.Type
+			}
+			errMsg := fmt.Sprintf("BYOC upload to storage '%s' (%s) failed: %v", storageName, def.ByocStorageConfig.Type, err)
 			logFn("error", "Storage", errMsg)
 			log.Printf("[backup] %s (backup: %s)", errMsg, def.Name)
 			result.Status = "failed"
