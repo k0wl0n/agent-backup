@@ -86,13 +86,22 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Auto-release $TAG"
 
-          if git push origin "$TAG"; then
+          # Try to push the tag
+          if git push origin "$TAG" 2>&1 | tee /tmp/push_output.txt; then
             echo "::notice::Created and pushed tag $TAG"
-          elif git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::notice::Tag $TAG was created by another run; continuing."
           else
-            echo "::error::Failed to push tag $TAG"
-            exit 1
+            # Check if the error is due to workflow file restrictions
+            if grep -q "refusing to allow.*workflow" /tmp/push_output.txt; then
+              echo "::warning::Cannot auto-create tag $TAG due to workflow file changes."
+              echo "::warning::Please manually create the tag: git tag $TAG && git push origin $TAG"
+              exit 0
+            elif git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "::notice::Tag $TAG was created by another run; continuing."
+            else
+              echo "::error::Failed to push tag $TAG"
+              cat /tmp/push_output.txt
+              exit 1
+            fi
           fi
 
   build:
