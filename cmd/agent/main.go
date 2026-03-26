@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -16,6 +17,45 @@ import (
 	"github.com/k0wl0n/agent-backup/internal/update"
 	"github.com/k0wl0n/agent-backup/internal/version"
 )
+
+// taskTracker prevents duplicate task execution with expiry
+type taskTracker struct {
+	mu       sync.Mutex
+	attempts map[string]time.Time
+	expiry   time.Duration
+}
+
+func newTaskTracker(expiry time.Duration) *taskTracker {
+	return &taskTracker{
+		attempts: make(map[string]time.Time),
+		expiry:   expiry,
+	}
+}
+
+// shouldRun returns true if the task should be executed
+func (tt *taskTracker) shouldRun(taskID string) bool {
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+
+	// Clean up expired attempts
+	now := time.Now()
+	for id, attemptTime := range tt.attempts {
+		if now.Sub(attemptTime) > tt.expiry {
+			delete(tt.attempts, id)
+		}
+	}
+
+	// Check if task was recently attempted
+	if attemptTime, exists := tt.attempts[taskID]; exists {
+		if now.Sub(attemptTime) < tt.expiry {
+			return false
+		}
+	}
+
+	// Mark task as attempted
+	tt.attempts[taskID] = now
+	return true
+}
 
 func main() {
 	log.Printf("[Agent] Starting Jokowipe Agent %s", version.Version)
@@ -47,19 +87,14 @@ func main() {
 		}
 	}
 
-	// Initialize client
+	// Initialize client using client.New() to properly initialize HTTPClient
 	hostname := cfg.Agent.Name
 	if hostname == "" {
 		if h, err := os.Hostname(); err == nil {
 			hostname = h
 		}
 	}
-	apiClient := &client.Client{
-		BaseURL:  *serverURL,
-		APIKey:   cfg.Agent.APIKey,
-		Hostname: hostname,
-		Type:     cfg.Agent.Type,
-	}
+	apiClient := client.New(*serverURL, cfg.Agent.APIKey, hostname, cfg.Agent.Type)
 
 	// Register agent
 	if err := apiClient.Register(); err != nil {
@@ -69,6 +104,10 @@ func main() {
 
 	// Initialize backup manager (pass apiClient so ExecuteTask can submit results)
 	backupMgr := backup.New(cfg, apiClient)
+
+	// Initialize task tracker with 10-minute expiry
+	// Tasks attempted within the last 10 minutes will be skipped
+	tracker := newTaskTracker(10 * time.Minute)
 
 	// Check for pending update flag from previous run
 	update.ClearUpdateFlag()
@@ -132,7 +171,6 @@ func main() {
 				targetVersion := *resp.UpdateVersion
 				if targetVersion != version.Version {
 					log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
-
 					// Trigger update in background
 					go func() {
 						if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
@@ -159,6 +197,12 @@ func main() {
 			}
 
 			if task != nil {
+				// Check if task should be executed (not recently attempted)
+				if !tracker.shouldRun(task.ID) {
+					log.Printf("[Agent] Task %s already attempted recently, skipping", task.ID)
+					continue
+				}
+
 				log.Printf("[Agent] Received task: %s (type: %s)", task.ID, task.Type)
 				go backupMgr.ExecuteTask(ctx, task)
 			}

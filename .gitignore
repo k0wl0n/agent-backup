@@ -4,12 +4,19 @@
 *.so
 *.dylib
 jokowipe-agent
-agent
-agent-bin
-agent-linux
-agent-test
-agent-*
+/agent
+/agent-bin
+/agent-linux
+/agent-test
+/agent-linux-*
+/agent-darwin-*
+/agent-windows-*
 bin/
+
+# Allow cmd/agent source code but ignore binaries
+!cmd/agent/
+cmd/agent/agent
+cmd/agent/agent-*
 
 # Logs
 *.log
