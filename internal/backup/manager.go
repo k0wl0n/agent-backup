@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // storageHTTPClient is used for all backup upload HTTP calls (S3, GCS, Azure, R2).
@@ -72,8 +73,9 @@ type BackupDefinition struct {
 	Retention       json.RawMessage `json:"retention"`
 	Compression     bool            `json:"compression"`
 	Encryption      bool            `json:"encryption"`
-	ArchivePassword string          `json:"archive_password,omitempty"`
-	Paused          bool            `json:"paused"`
+	ArchivePassword    string `json:"archive_password,omitempty"`
+	EncryptionPassword string `json:"encryption_password,omitempty"`
+	Paused             bool   `json:"paused"`
 	CreatedAt       time.Time       `json:"created_at"`
 
 	// Platform-managed upload coordinates injected by the backend.
@@ -464,6 +466,25 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		logFn("info", "Encryptor", fmt.Sprintf("Encrypted → %s", filepath.Base(encPath)))
 	}
 
+	// Encrypt backup file with OpenSSL-compatible AES-256-CBC if user set an encryption password
+	if def.EncryptionPassword != "" {
+		logFn("info", "Encryptor", "Encrypting backup with OpenSSL AES-256-CBC (user password)")
+		encPath, err := encryptBackupFileOpenSSL(localPath, def.EncryptionPassword)
+		if err != nil {
+			logFn("error", "Encryptor", fmt.Sprintf("OpenSSL encryption failed: %v", err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "openssl encryption failed")
+			return nil, fmt.Errorf("OpenSSL AES-256-CBC encryption failed: %w", err)
+		}
+		os.Remove(localPath) // remove unencrypted file
+		localPath = encPath
+		filename = filepath.Base(encPath)
+		if fi, err2 := os.Stat(localPath); err2 == nil {
+			fileInfo = fi
+		}
+		logFn("info", "Encryptor", fmt.Sprintf("OpenSSL encrypted -> %s", filepath.Base(encPath)))
+	}
+
 	result := &BackupResult{
 		Status:    "success",
 		Size:      fileInfo.Size(),
@@ -632,6 +653,57 @@ func encryptBackupFile(srcPath, keyHex string) (string, error) {
 
 	encPath := srcPath + ".enc"
 	if err := os.WriteFile(encPath, ciphertext, 0600); err != nil {
+		return "", fmt.Errorf("write encrypted file: %w", err)
+	}
+	return encPath, nil
+}
+
+// encryptBackupFileOpenSSL encrypts srcPath with AES-256-CBC using a password,
+// producing output compatible with: openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -md sha256 -d
+// File format: "Salted__" (8 bytes) + salt (8 bytes) + AES-256-CBC ciphertext (PKCS7 padded)
+func encryptBackupFileOpenSSL(srcPath, password string) (string, error) {
+	plaintext, err := os.ReadFile(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("read backup file: %w", err)
+	}
+
+	// Generate 8-byte random salt
+	salt := make([]byte, 8)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return "", fmt.Errorf("generate salt: %w", err)
+	}
+
+	// Derive key (32 bytes) and IV (16 bytes) using PBKDF2 with SHA-256, 10000 iterations
+	keyIV := pbkdf2.Key([]byte(password), salt, 10000, 32+16, sha256.New)
+	key := keyIV[:32]
+	iv := keyIV[32:]
+
+	// AES-256-CBC with PKCS7 padding
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("create AES cipher: %w", err)
+	}
+
+	// PKCS7 padding
+	padLen := aes.BlockSize - (len(plaintext) % aes.BlockSize)
+	padded := make([]byte, len(plaintext)+padLen)
+	copy(padded, plaintext)
+	for i := len(plaintext); i < len(padded); i++ {
+		padded[i] = byte(padLen)
+	}
+
+	ciphertext := make([]byte, len(padded))
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ciphertext, padded)
+
+	// Write OpenSSL format: "Salted__" + salt + ciphertext
+	encPath := srcPath + ".enc"
+	out := make([]byte, 0, 8+8+len(ciphertext))
+	out = append(out, []byte("Salted__")...)
+	out = append(out, salt...)
+	out = append(out, ciphertext...)
+
+	if err := os.WriteFile(encPath, out, 0600); err != nil {
 		return "", fmt.Errorf("write encrypted file: %w", err)
 	}
 	return encPath, nil
