@@ -1,12 +1,8 @@
-name: Security Scans
+name: Security Scans (Disabled)
 
+# Workflow disabled - only manual trigger available
+# To re-enable: uncomment push, pull_request, and schedule triggers
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: '0 6 * * 1'  # Every Monday 06:00 UTC
   workflow_dispatch:
 
 permissions:
