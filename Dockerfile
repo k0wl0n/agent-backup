@@ -46,6 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mariadb-client \
     redis-tools \
     mongodb-database-tools \
+    zip \
     && apt-get purge -y gnupg curl \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
