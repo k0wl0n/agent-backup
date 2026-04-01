@@ -137,16 +137,19 @@ func main() {
 	// Check for pending update flag from previous run
 	update.ClearUpdateFlag()
 
-	// Initialize update handler
-	isDocker := os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv")
-	updateHandler := &update.UpdateHandler{
-		Version:    version.Version,
-		IsDocker:   isDocker,
-		BinaryPath: os.Args[0],
-		BackupCheckFn: func() bool {
-			return !backupMgr.HasRunningBackups()
-		},
-	}
+	// Initialize update handler (disabled to prevent infinite loops)
+	// TODO: Implement proper version-based updates instead of "latest"
+	/*
+		isDocker := os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv")
+		updateHandler := &update.UpdateHandler{
+			Version:    version.Version,
+			IsDocker:   isDocker,
+			BinaryPath: os.Args[0],
+			BackupCheckFn: func() bool {
+				return !backupMgr.HasRunningBackups()
+			},
+		}
+	*/
 
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -166,7 +169,7 @@ func main() {
 		defer taskTicker.Stop()
 	}
 
-	log.Printf("[Agent] Agent started successfully (Docker: %v)", isDocker)
+	log.Printf("[Agent] Agent started successfully (Docker: %v)", os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv"))
 
 	for {
 		if taskTicker != nil {
@@ -181,7 +184,7 @@ func main() {
 				return
 
 			case <-heartbeatTicker.C:
-				resp, err := apiClient.SendHeartbeat()
+				_, err := apiClient.SendHeartbeat()
 				if err != nil {
 					if err == client.ErrRevoked {
 						log.Printf("[Agent] API key revoked, shutting down...")
@@ -192,19 +195,23 @@ func main() {
 					continue
 				}
 
-				// Check for update command
-				if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
-					targetVersion := *resp.UpdateVersion
-					if targetVersion != version.Version {
-						log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
-						// Trigger update in background
-						go func() {
-							if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
-								log.Printf("[Agent] Update failed: %v", err)
-							}
-						}()
+				// Automatic updates disabled to prevent infinite loops
+				// TODO: Implement proper version-based updates instead of "latest"
+				/*
+					// Check for update command
+					if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
+						targetVersion := *resp.UpdateVersion
+						if targetVersion != version.Version {
+							log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
+							// Trigger update in background
+							go func() {
+								if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
+									log.Printf("[Agent] Update failed: %v", err)
+								}
+							}()
+						}
 					}
-				}
+				*/
 
 			case <-taskTicker.C:
 				if !cfg.Gateway.Enabled {
@@ -245,7 +252,7 @@ func main() {
 				return
 
 			case <-heartbeatTicker.C:
-				resp, err := apiClient.SendHeartbeat()
+				_, err := apiClient.SendHeartbeat()
 				if err != nil {
 					if err == client.ErrRevoked {
 						log.Printf("[Agent] API key revoked, shutting down...")
@@ -256,19 +263,23 @@ func main() {
 					continue
 				}
 
-				// Check for update command
-				if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
-					targetVersion := *resp.UpdateVersion
-					if targetVersion != version.Version {
-						log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
-						// Trigger update in background
-						go func() {
-							if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
-								log.Printf("[Agent] Update failed: %v", err)
-							}
-						}()
+				// Automatic updates disabled to prevent infinite loops
+				// TODO: Implement proper version-based updates instead of "latest"
+				/*
+					// Check for update command
+					if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
+						targetVersion := *resp.UpdateVersion
+						if targetVersion != version.Version {
+							log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
+							// Trigger update in background
+							go func() {
+								if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
+									log.Printf("[Agent] Update failed: %v", err)
+								}
+							}()
+						}
 					}
-				}
+				*/
 			}
 		}
 	}
