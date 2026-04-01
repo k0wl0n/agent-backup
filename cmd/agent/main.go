@@ -66,15 +66,40 @@ func main() {
 	serverURL := flag.String("server", "https://api.jokowipe.id", "Backend server URL")
 	flag.Parse()
 
-	// Load configuration
+	// Load configuration (will use defaults if file doesn't exist)
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("[Agent] Failed to load config: %v", err)
 	}
 
+	// If running in Docker without a config file, ensure we have defaults
+	if cfg.Agent.Type == "" {
+		cfg.Agent.Type = "host"
+	}
+
 	// CLI flag overrides config file values
 	if *apiKeyFlag != "" {
 		cfg.Agent.APIKey = *apiKeyFlag
+	}
+
+	// Environment variable overrides both config file and CLI flag (for Docker containers)
+	if envAPIKey := os.Getenv("JOKOWIPE_API_KEY"); envAPIKey != "" {
+		cfg.Agent.APIKey = envAPIKey
+	}
+
+	// Environment variable for agent name (for Docker containers)
+	if envAgentName := os.Getenv("JOKOWIPE_AGENT_NAME"); envAgentName != "" {
+		cfg.Agent.Name = envAgentName
+	}
+
+	// Environment variable for agent type (for Docker containers)
+	if envAgentType := os.Getenv("JOKOWIPE_AGENT_TYPE"); envAgentType != "" {
+		cfg.Agent.Type = envAgentType
+	}
+
+	// Environment variable for server URL (for Docker containers)
+	if envServerURL := os.Getenv("JOKOWIPE_SERVER_URL"); envServerURL != "" {
+		*serverURL = envServerURL
 	}
 
 	// Initialize telemetry if configured
