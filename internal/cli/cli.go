@@ -331,7 +331,8 @@ func cmdStart(cfg *Config) {
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from terminal
+	// Detach from terminal on Unix systems
+	setSysProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		printErr(fmt.Sprintf("Failed to start agent: %v", err))
