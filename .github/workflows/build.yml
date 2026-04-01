@@ -17,7 +17,7 @@ env:
 jobs:
   test:
     name: Unit Tests
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
@@ -33,7 +33,7 @@ jobs:
 
   version:
     name: Calculate Version
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semver.outputs.version }}
       is_tag: ${{ steps.semver.outputs.is_tag }}
@@ -108,7 +108,7 @@ jobs:
     name: Build & Push Docker Image
     needs: [test, version]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 

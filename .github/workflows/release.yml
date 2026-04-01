@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-binaries:
     name: Build Multi-Arch Binaries
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -65,7 +65,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: build-binaries
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
