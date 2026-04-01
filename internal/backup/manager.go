@@ -28,8 +28,8 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-	agentConfig "github.com/k0wl0n/agent-backup/internal/config"
 	"github.com/k0wl0n/agent-backup/internal/client"
+	agentConfig "github.com/k0wl0n/agent-backup/internal/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -61,22 +61,22 @@ type ByocStorageConfig struct {
 }
 
 type BackupDefinition struct {
-	ID              string          `json:"id"`
-	AgentID         string          `json:"agent_id"`
-	Name            string          `json:"name"`
-	Type            string          `json:"type"` // "database", "file"
-	SourceConfig    json.RawMessage `json:"source_config"`
-	StorageID       string          `json:"storage_id"`
-	StoragePath     string          `json:"storage_path"`
-	ScheduleType    string          `json:"schedule_type"`
-	CronExp         string          `json:"cron_exp"`
-	Retention       json.RawMessage `json:"retention"`
-	Compression     bool            `json:"compression"`
-	Encryption      bool            `json:"encryption"`
-	ArchivePassword    string `json:"archive_password,omitempty"`
-	EncryptionPassword string `json:"encryption_password,omitempty"`
-	Paused             bool   `json:"paused"`
-	CreatedAt       time.Time       `json:"created_at"`
+	ID                 string          `json:"id"`
+	AgentID            string          `json:"agent_id"`
+	Name               string          `json:"name"`
+	Type               string          `json:"type"` // "database", "file"
+	SourceConfig       json.RawMessage `json:"source_config"`
+	StorageID          string          `json:"storage_id"`
+	StoragePath        string          `json:"storage_path"`
+	ScheduleType       string          `json:"schedule_type"`
+	CronExp            string          `json:"cron_exp"`
+	Retention          json.RawMessage `json:"retention"`
+	Compression        bool            `json:"compression"`
+	Encryption         bool            `json:"encryption"`
+	ArchivePassword    string          `json:"archive_password,omitempty"`
+	EncryptionPassword string          `json:"encryption_password,omitempty"`
+	Paused             bool            `json:"paused"`
+	CreatedAt          time.Time       `json:"created_at"`
 
 	// Platform-managed upload coordinates injected by the backend.
 	// The agent uses PlatformUploadURL (a presigned PUT URL) to upload the
@@ -183,11 +183,11 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 	if logFn == nil {
 		logFn = func(_, _, _ string) {}
 	}
-	
+
 	// Track this backup as running
 	bm.runningBackups.Store(def.ID, true)
 	defer bm.runningBackups.Delete(def.ID)
-	
+
 	ctx, span := otel.Tracer("jokowipe-agent").Start(ctx, "ExecuteBackup")
 	defer span.End()
 
@@ -724,14 +724,14 @@ func platformUpload(ctx context.Context, presignedURL, localPath string, logFn f
 	}
 	fileSize := fi.Size()
 
-	_, retryErr := backoff.Retry(ctx, func() (struct{}, error) {
-		f, err := os.Open(localPath)
-		if err != nil {
-			return struct{}{}, backoff.Permanent(fmt.Errorf("open file: %w", err))
-		}
-		defer f.Close()
+	// Read file into memory to avoid file handle issues during HTTP upload
+	fileData, err := os.ReadFile(localPath)
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
 
-		req, err := http.NewRequestWithContext(ctx, "PUT", presignedURL, f)
+	_, retryErr := backoff.Retry(ctx, func() (struct{}, error) {
+		req, err := http.NewRequestWithContext(ctx, "PUT", presignedURL, bytes.NewReader(fileData))
 		if err != nil {
 			return struct{}{}, backoff.Permanent(fmt.Errorf("build request: %w", err))
 		}
