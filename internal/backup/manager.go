@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -122,12 +123,16 @@ func (bm *BackupManager) HasRunningBackups() bool {
 	return hasRunning
 }
 
-// ExecuteTask handles a task from the server: parses the payload as BackupDefinition,
-// runs ExecuteBackup, and submits the result (success or failure) via SubmitTaskResult.
+// ExecuteTask handles a task from the server: routes by type, then submits the result.
 func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
 	t, ok := task.(*client.Task)
 	if !ok {
 		log.Printf("[BackupManager] ExecuteTask: unexpected task type %T", task)
+		return
+	}
+
+	if t.Type == "test_connection" {
+		bm.executeTestConnection(ctx, t)
 		return
 	}
 
@@ -142,6 +147,7 @@ func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
 
 	logFn := func(level, component, message string) {
 		log.Printf("[%s][%s] %s", strings.ToUpper(level), component, message)
+		bm.client.PushLog(t.ID, level, component, message)
 	}
 
 	result, err := bm.ExecuteBackup(ctx, def, logFn)
@@ -159,6 +165,35 @@ func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
 	if submitErr := bm.client.SubmitTaskResult(t.ID, result, result.ErrorMsg, result.Size, result.Duration.Milliseconds()); submitErr != nil {
 		log.Printf("[BackupManager] ExecuteTask: failed to submit result for task %s: %v", t.ID, submitErr)
 	}
+}
+
+// executeTestConnection performs a TCP dial against the source host:port and reports
+// the result back to the backend via SubmitTaskResult.
+func (bm *BackupManager) executeTestConnection(ctx context.Context, t *client.Task) {
+	var src SourceConfig
+	if err := json.Unmarshal(t.Payload, &src); err != nil {
+		bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("invalid payload: %v", err), 0, 0)
+		return
+	}
+
+	port := effectivePort(src)
+	if port == 0 {
+		port = 5432
+	}
+	addr := fmt.Sprintf("%s:%d", strings.TrimSpace(src.Host), port)
+
+	log.Printf("[test_connection] dialing %s (type=%s)", addr, src.Type)
+
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		log.Printf("[test_connection] failed: %v", err)
+		bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("cannot reach %s: %v", addr, err), 0, 0)
+		return
+	}
+	conn.Close()
+
+	log.Printf("[test_connection] success: %s is reachable", addr)
+	bm.client.SubmitTaskResult(t.ID, map[string]string{"status": "ok", "addr": addr}, "", 0, 0)
 }
 
 // effectivePort returns the standard port for the database type if port is 0.
@@ -205,6 +240,7 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		span.SetStatus(codes.Error, "failed to parse source config")
 		return nil, fmt.Errorf("failed to parse source config: %w", err)
 	}
+	source.Host = strings.TrimSpace(source.Host)
 
 	logFn("info", "Scheduler", fmt.Sprintf("Performing backup: %s", def.Name))
 
@@ -216,12 +252,19 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		attribute.Int("net.peer.port", source.Port),
 	)
 
-	// Determine backup directory: use StoragePath if set, otherwise default to /var/lib/jokowipe/backups
+	// Determine backup directory: prefer def.StoragePath, then cfg.Storage.TargetFolder, then "backups"
 	backupDir := def.StoragePath
 	if backupDir == "" || backupDir == "/" {
-		backupDir = "/var/lib/jokowipe/backups"
-	} else if !filepath.IsAbs(backupDir) {
-		backupDir = "/" + backupDir
+		backupDir = bm.cfg.Storage.TargetFolder
+	}
+	if backupDir == "" || backupDir == "/" {
+		backupDir = "backups"
+	}
+	// If the path requires root (Linux system paths), test write access and fall back if denied
+	if filepath.IsAbs(backupDir) {
+		if err := os.MkdirAll(backupDir, 0755); err != nil {
+			backupDir = "backups"
+		}
 	}
 
 	// Determine Command based on Source Type
@@ -408,36 +451,6 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to stat backup file")
 		return nil, fmt.Errorf("failed to stat backup file: %w", err)
-	}
-
-	// Password-protect backup file with zip if archive_password is set
-	if def.ArchivePassword != "" {
-		if _, err := exec.LookPath("zip"); err != nil {
-			logFn("warn", "Archive", "zip command not found - skipping password protection")
-		} else {
-			logFn("info", "Archive", "Creating password-protected zip archive")
-			zipPath := localPath + ".zip"
-
-			// Use zip with password: zip -P password -j output.zip input_file
-			// -P: password, -j: junk paths (store just filename), -q: quiet
-			cmd := exec.CommandContext(ctx, "zip", "-P", def.ArchivePassword, "-j", "-q", zipPath, localPath)
-			if err := cmd.Run(); err != nil {
-				logFn("error", "Archive", fmt.Sprintf("Password protection failed: %v", err))
-				span.RecordError(err)
-				span.SetStatus(codes.Error, "zip password protection failed")
-				return nil, fmt.Errorf("failed to create password-protected archive: %w", err)
-			}
-
-			os.Remove(localPath) // remove unprotected file
-			localPath = zipPath
-			filename = filepath.Base(zipPath)
-
-			// Refresh file size after zipping
-			if fi, err2 := os.Stat(localPath); err2 == nil {
-				fileInfo = fi
-			}
-			logFn("info", "Archive", fmt.Sprintf("Password-protected → %s", filepath.Base(zipPath)))
-		}
 	}
 
 	// Encrypt backup file with AES-256-GCM if requested

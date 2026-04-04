@@ -1,6 +1,6 @@
 agent:
   # server_url: "http://backend:8000" (Passed via CLI in Docker)
-  name: "local-agent-01" # Must match test expectation
+  # name is intentionally omitted — falls back to container hostname (unique per container)
   api_key: "local-dev-key"
 
 temporal:

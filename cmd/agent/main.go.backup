@@ -1,0 +1,172 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/k0wl0n/agent-backup/internal/backup"
+	"github.com/k0wl0n/agent-backup/internal/client"
+	"github.com/k0wl0n/agent-backup/internal/config"
+	"github.com/k0wl0n/agent-backup/internal/telemetry"
+	"github.com/k0wl0n/agent-backup/internal/update"
+	"github.com/k0wl0n/agent-backup/internal/version"
+)
+
+func main() {
+	log.Printf("[Agent] Starting Jokowipe Agent %s", version.Version)
+
+	// Parse CLI flags (passed by the jw CLI wrapper)
+	configPath := flag.String("config", "agent.yaml", "Path to agent config file")
+	apiKeyFlag := flag.String("api-key", "", "API key (overrides config file)")
+	serverURL := flag.String("server", "https://api.jokowipe.id", "Backend server URL")
+	flag.Parse()
+
+	// Load configuration
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("[Agent] Failed to load config: %v", err)
+	}
+
+	// CLI flag overrides config file values
+	if *apiKeyFlag != "" {
+		cfg.Agent.APIKey = *apiKeyFlag
+	}
+
+	// Initialize telemetry if configured
+	if cfg.Telemetry.Enabled {
+		shutdown, err := telemetry.InitTelemetry(context.Background(), "jokowipe-agent", version.Version, cfg.Telemetry.Endpoint, cfg.Telemetry.APIKey)
+		if err != nil {
+			log.Printf("[Agent] Failed to initialize telemetry: %v", err)
+		} else {
+			defer shutdown(context.Background())
+		}
+	}
+
+	// Initialize client
+	hostname := cfg.Agent.Name
+	if hostname == "" {
+		if h, err := os.Hostname(); err == nil {
+			hostname = h
+		}
+	}
+	apiClient := &client.Client{
+		BaseURL:  *serverURL,
+		APIKey:   cfg.Agent.APIKey,
+		Hostname: hostname,
+		Type:     cfg.Agent.Type,
+	}
+
+	// Register agent
+	if err := apiClient.Register(); err != nil {
+		log.Fatalf("[Agent] Failed to register: %v", err)
+	}
+	log.Printf("[Agent] Registered with ID: %s", apiClient.AgentID)
+
+	// Initialize backup manager (pass apiClient so ExecuteTask can submit results)
+	backupMgr := backup.New(cfg, apiClient)
+
+	// Check for pending update flag from previous run
+	update.ClearUpdateFlag()
+
+	// Initialize update handler
+	isDocker := os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv")
+	updateHandler := &update.UpdateHandler{
+		Version:    version.Version,
+		IsDocker:   isDocker,
+		BinaryPath: os.Args[0],
+		BackupCheckFn: func() bool {
+			return !backupMgr.HasRunningBackups()
+		},
+	}
+
+	// Setup signal handling
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start heartbeat loop
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
+
+	// Start task polling loop (if in gateway mode)
+	var taskTicker *time.Ticker
+	if cfg.Gateway.Enabled {
+		taskTicker = time.NewTicker(5 * time.Second)
+		defer taskTicker.Stop()
+	}
+
+	log.Printf("[Agent] Agent started successfully (Docker: %v)", isDocker)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[Agent] Context cancelled, shutting down...")
+			return
+
+		case sig := <-sigChan:
+			log.Printf("[Agent] Received signal %v, shutting down gracefully...", sig)
+			cancel()
+			return
+
+		case <-heartbeatTicker.C:
+			resp, err := apiClient.SendHeartbeat()
+			if err != nil {
+				if err == client.ErrRevoked {
+					log.Printf("[Agent] API key revoked, shutting down...")
+					cancel()
+					return
+				}
+				log.Printf("[Agent] Heartbeat failed: %v", err)
+				continue
+			}
+
+			// Check for update command
+			if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
+				targetVersion := *resp.UpdateVersion
+				if targetVersion != version.Version {
+					log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
+
+					// Trigger update in background
+					go func() {
+						if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
+							log.Printf("[Agent] Update failed: %v", err)
+						}
+					}()
+				}
+			}
+
+		case <-taskTicker.C:
+			if !cfg.Gateway.Enabled {
+				continue
+			}
+
+			task, err := apiClient.PollTask()
+			if err != nil {
+				if err == client.ErrRevoked {
+					log.Printf("[Agent] API key revoked, shutting down...")
+					cancel()
+					return
+				}
+				log.Printf("[Agent] Task poll failed: %v", err)
+				continue
+			}
+
+			if task != nil {
+				log.Printf("[Agent] Received task: %s (type: %s)", task.ID, task.Type)
+				go backupMgr.ExecuteTask(ctx, task)
+			}
+		}
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
