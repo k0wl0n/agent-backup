@@ -8,6 +8,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "true" || v == "1" {
+		return true
+	}
+	if v == "false" || v == "0" {
+		return false
+	}
+	return fallback
+}
+
 // S3Config holds Amazon S3 (or S3-compatible) credentials.
 type S3Config struct {
 	AccessKeyID     string `yaml:"access_key_id" json:"access_key_id"`
@@ -100,7 +111,7 @@ func Load(path string) (*Config, error) {
 	cfg.Temporal.HostPort = "localhost:7233"
 	cfg.Temporal.Namespace = "default"
 	cfg.Storage.RetentionDays = 7
-	cfg.Gateway.Enabled = false
+	cfg.Gateway.Enabled = envBool("JOKOWIPE_GATEWAY_ENABLED", false)
 
 	// Read file
 	data, err := os.ReadFile(path)

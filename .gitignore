@@ -1,3 +1,9 @@
+# Air build output
+tmp/
+
+# Dev env symlink
+.env.local
+
 # Binaries
 *.exe
 *.dll

@@ -1,0 +1,37 @@
+# Lightweight dev image — skips pg_dump/mongodump/redis-tools for fast local builds.
+# Use the full Dockerfile for production images.
+FROM golang:1.25-bookworm AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/jokowipe-agent ./cmd/agent
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates gnupg curl \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+       | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [ signed-by=/usr/share/keyrings/postgresql.gpg ] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+       | tee /etc/apt/sources.list.d/pgdg.list \
+    && curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
+       | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+    && echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+       | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 mariadb-client redis-tools zip \
+    && (apt-get install -y --no-install-recommends mongodb-database-tools || echo "WARNING: mongodump unavailable on this arch") \
+    && apt-get purge -y gnupg curl \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN mkdir -p /etc/jokowipe /var/lib/jokowipe/backups && chown -R appuser:appgroup /etc/jokowipe /var/lib/jokowipe
+
+COPY --from=builder /app/jokowipe-agent /usr/local/bin/jokowipe-agent
+RUN chmod +x /usr/local/bin/jokowipe-agent
+COPY agent.docker.yaml /etc/jokowipe/agent.yaml
+
+USER appuser
+ENTRYPOINT ["/usr/local/bin/jokowipe-agent", "--config", "/etc/jokowipe/agent.yaml"]

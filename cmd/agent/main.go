@@ -163,123 +163,83 @@ func main() {
 	defer heartbeatTicker.Stop()
 
 	// Start task polling loop (if in gateway mode)
-	var taskTicker *time.Ticker
+	// Use a nil channel when gateway is disabled — nil channels block forever in select,
+	// so the case never fires without panicking.
+	var taskTickerC <-chan time.Time
 	if cfg.Gateway.Enabled {
-		taskTicker = time.NewTicker(5 * time.Second)
+		taskTicker := time.NewTicker(5 * time.Second)
 		defer taskTicker.Stop()
+		taskTickerC = taskTicker.C
 	}
 
 	log.Printf("[Agent] Agent started successfully (Docker: %v)", os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv"))
 
 	for {
-		if taskTicker != nil {
-			select {
-			case <-ctx.Done():
-				log.Printf("[Agent] Context cancelled, shutting down...")
-				return
+		select {
+		case <-ctx.Done():
+			log.Printf("[Agent] Context cancelled, shutting down...")
+			return
 
-			case sig := <-sigChan:
-				log.Printf("[Agent] Received signal %v, shutting down gracefully...", sig)
-				cancel()
-				return
+		case sig := <-sigChan:
+			log.Printf("[Agent] Received signal %v, shutting down gracefully...", sig)
+			cancel()
+			return
 
-			case <-heartbeatTicker.C:
-				_, err := apiClient.SendHeartbeat()
-				if err != nil {
-					if err == client.ErrRevoked {
-						log.Printf("[Agent] API key revoked, shutting down...")
-						cancel()
-						return
-					}
-					log.Printf("[Agent] Heartbeat failed: %v", err)
-					continue
+		case <-heartbeatTicker.C:
+			_, err := apiClient.SendHeartbeat()
+			if err != nil {
+				if err == client.ErrRevoked {
+					log.Printf("[Agent] API key revoked, shutting down...")
+					cancel()
+					return
 				}
-
-				// Automatic updates disabled to prevent infinite loops
-				// TODO: Implement proper version-based updates instead of "latest"
-				/*
-					// Check for update command
-					if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
-						targetVersion := *resp.UpdateVersion
-						if targetVersion != version.Version {
-							log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
-							// Trigger update in background
-							go func() {
-								if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
-									log.Printf("[Agent] Update failed: %v", err)
-								}
-							}()
-						}
-					}
-				*/
-
-			case <-taskTicker.C:
-				if !cfg.Gateway.Enabled {
-					continue
-				}
-
-				task, err := apiClient.PollTask()
-				if err != nil {
-					if err == client.ErrRevoked {
-						log.Printf("[Agent] API key revoked, shutting down...")
-						cancel()
-						return
-					}
-					log.Printf("[Agent] Task poll failed: %v", err)
-					continue
-				}
-
-				if task != nil {
-					// Check if task should be executed (not recently attempted)
-					if !tracker.shouldRun(task.ID) {
-						log.Printf("[Agent] Task %s already attempted recently, skipping", task.ID)
-						continue
-					}
-
-					log.Printf("[Agent] Received task: %s (type: %s)", task.ID, task.Type)
-					go backupMgr.ExecuteTask(ctx, task)
-				}
+				log.Printf("[Agent] Heartbeat failed: %v", err)
+				continue
 			}
-		} else {
-			select {
-			case <-ctx.Done():
-				log.Printf("[Agent] Context cancelled, shutting down...")
-				return
 
-			case sig := <-sigChan:
-				log.Printf("[Agent] Received signal %v, shutting down gracefully...", sig)
-				cancel()
-				return
-
-			case <-heartbeatTicker.C:
-				_, err := apiClient.SendHeartbeat()
-				if err != nil {
-					if err == client.ErrRevoked {
-						log.Printf("[Agent] API key revoked, shutting down...")
-						cancel()
-						return
+			// Automatic updates disabled to prevent infinite loops
+			// TODO: Implement proper version-based updates instead of "latest"
+			/*
+				// Check for update command
+				if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
+					targetVersion := *resp.UpdateVersion
+					if targetVersion != version.Version {
+						log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
+						// Trigger update in background
+						go func() {
+							if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
+								log.Printf("[Agent] Update failed: %v", err)
+							}
+						}()
 					}
-					log.Printf("[Agent] Heartbeat failed: %v", err)
+				}
+			*/
+
+		case <-taskTickerC:
+			if !cfg.Gateway.Enabled {
+				continue
+			}
+
+			task, err := apiClient.PollTask()
+			if err != nil {
+				if err == client.ErrRevoked {
+					log.Printf("[Agent] API key revoked, shutting down...")
+					cancel()
+					return
+				}
+				log.Printf("[Agent] Task poll failed: %v", err)
+				continue
+			}
+
+			if task != nil {
+				// Check if task should be executed (not recently attempted)
+				if !tracker.shouldRun(task.ID) {
+					log.Printf("[Agent] Task %s already attempted recently, skipping", task.ID)
 					continue
 				}
 
-				// Automatic updates disabled to prevent infinite loops
-				// TODO: Implement proper version-based updates instead of "latest"
-				/*
-					// Check for update command
-					if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
-						targetVersion := *resp.UpdateVersion
-						if targetVersion != version.Version {
-							log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
-							// Trigger update in background
-							go func() {
-								if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
-									log.Printf("[Agent] Update failed: %v", err)
-								}
-							}()
-						}
-					}
-				*/
+				log.Printf("[Agent] Received task: %s (type: %s)", task.ID, task.Type)
+				go backupMgr.ExecuteTask(ctx, task)
 			}
 		}
 	}
