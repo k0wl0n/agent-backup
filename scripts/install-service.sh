@@ -160,7 +160,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=${SERVICE_USER}
-ExecStart=${BINARY} agent --config ${CONFIG_FILE} --server ${SERVER_URL}
+Environment=JOKOWIPE_API_KEY=${API_KEY}
+ExecStart=${BINARY} --config ${CONFIG_FILE} --server ${SERVER_URL}
 Restart=on-failure
 RestartSec=10s
 StandardOutput=journal
