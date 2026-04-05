@@ -57,6 +57,7 @@ type Client struct {
 	APIKey     string
 	Hostname   string
 	Type       string
+	Version    string
 	HTTPClient *http.Client
 	AgentID    string
 }
@@ -123,12 +124,13 @@ type TaskResult struct {
 	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
-func New(baseURL, apiKey, hostname, agentType string) *Client {
+func New(baseURL, apiKey, hostname, agentType, agentVersion string) *Client {
 	return &Client{
 		BaseURL:  baseURL,
 		APIKey:   apiKey,
 		Hostname: hostname,
 		Type:     agentType,
+		Version:  agentVersion,
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
@@ -155,7 +157,7 @@ func (c *Client) Register() error {
 	reqBody := RegisterRequest{
 		APIKey:   c.APIKey,
 		Hostname: hostname,
-		Version:  "0.1.0",
+		Version:  c.Version,
 		Type:     c.Type,
 	}
 

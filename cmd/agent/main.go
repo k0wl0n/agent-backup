@@ -145,7 +145,7 @@ func main() {
 			hostname = h
 		}
 	}
-	apiClient := client.New(*serverURL, cfg.Agent.APIKey, hostname, cfg.Agent.Type)
+	apiClient := client.New(*serverURL, cfg.Agent.APIKey, hostname, cfg.Agent.Type, version.Version)
 
 	// Register agent
 	if err := apiClient.Register(); err != nil {
