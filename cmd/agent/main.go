@@ -61,7 +61,14 @@ func main() {
 	log.Printf("[Agent] Starting Jokowipe Agent %s", version.Version)
 
 	// Parse CLI flags (passed by the jw CLI wrapper)
-	configPath := flag.String("config", "agent.yaml", "Path to agent config file")
+	defaultCfgPath := func() string {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "agent.yaml"
+		}
+		return home + "/.config/jokowipe/agent.yaml"
+	}()
+	configPath := flag.String("config", defaultCfgPath, "Path to agent config file")
 	apiKeyFlag := flag.String("api-key", "", "API key (overrides config file)")
 	serverURL := flag.String("server", "https://api.jokowipe.id", "Backend server URL")
 	flag.Parse()
@@ -80,34 +87,43 @@ func main() {
 		}
 	}
 
-	// If running in Docker without a config file, ensure we have defaults
+	// Detect deployment mode: Kubernetes > Docker > local binary
+	isKubernetes := os.Getenv("KUBERNETES_SERVICE_HOST") != ""
+	isDocker := !isKubernetes && (os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv"))
+
+	// Environment variables always override config file values.
+	// Resolution order (lowest → highest priority): config file → env var → CLI flag.
+	if envAPIKey := os.Getenv("JOKOWIPE_API_KEY"); envAPIKey != "" {
+		cfg.Agent.APIKey = envAPIKey
+	}
+	if *apiKeyFlag != "" {
+		cfg.Agent.APIKey = *apiKeyFlag
+	}
+	if envAgentName := os.Getenv("JOKOWIPE_AGENT_NAME"); envAgentName != "" {
+		cfg.Agent.Name = envAgentName
+	}
+	if envAgentType := os.Getenv("JOKOWIPE_AGENT_TYPE"); envAgentType != "" {
+		cfg.Agent.Type = envAgentType
+	}
+	if envServerURL := os.Getenv("JOKOWIPE_SERVER_URL"); envServerURL != "" {
+		*serverURL = envServerURL
+	}
+
+	// Default agent type when not explicitly configured
 	if cfg.Agent.Type == "" {
 		cfg.Agent.Type = "host"
 	}
 
-	// CLI flag overrides config file values
-	if *apiKeyFlag != "" {
-		cfg.Agent.APIKey = *apiKeyFlag
-	}
-
-	// Environment variable overrides both config file and CLI flag (for Docker containers)
-	if envAPIKey := os.Getenv("JOKOWIPE_API_KEY"); envAPIKey != "" {
-		cfg.Agent.APIKey = envAPIKey
-	}
-
-	// Environment variable for agent name (for Docker containers)
-	if envAgentName := os.Getenv("JOKOWIPE_AGENT_NAME"); envAgentName != "" {
-		cfg.Agent.Name = envAgentName
-	}
-
-	// Environment variable for agent type (for Docker containers)
-	if envAgentType := os.Getenv("JOKOWIPE_AGENT_TYPE"); envAgentType != "" {
-		cfg.Agent.Type = envAgentType
-	}
-
-	// Environment variable for server URL (for Docker containers)
-	if envServerURL := os.Getenv("JOKOWIPE_SERVER_URL"); envServerURL != "" {
-		*serverURL = envServerURL
+	// In Docker/K8s, enable gateway by default so the agent polls for tasks.
+	// Users can override with JOKOWIPE_GATEWAY_ENABLED=false if needed.
+	if isDocker || isKubernetes {
+		if os.Getenv("JOKOWIPE_GATEWAY_ENABLED") == "" {
+			cfg.Gateway.Enabled = true
+		}
+		// Use the container's dedicated backup staging directory when no target is set.
+		if cfg.Storage.TargetFolder == "" {
+			cfg.Storage.TargetFolder = "/var/lib/jokowipe/backups"
+		}
 	}
 
 	// Validate configuration after all overrides are applied
@@ -160,16 +176,26 @@ func main() {
 	// Tasks attempted within the last 10 minutes will be skipped
 	tracker := newTaskTracker(10 * time.Minute)
 
-	// Check for pending update flag from previous run
+	// Check for pending update flag from previous run (Docker restart after update)
 	update.ClearUpdateFlag()
+
+	// Determine deploy mode for update handling
+	deployMode := update.DeployBinary
+	if isKubernetes {
+		deployMode = update.DeployKubernetes
+	} else if isDocker {
+		deployMode = update.DeployDocker
+	}
 
 	// Auto-update handler: downloads and installs a new binary when the backend
 	// sends update_version in the heartbeat response. Waits for in-flight backups
-	// to finish before replacing the binary. No-op on Docker (uses image restart).
-	isDocker := os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv")
+	// to finish before replacing the binary.
+	//   Binary → atomic replace + re-exec
+	//   Docker → write flag file + exit (container restart policy handles restart)
+	//   Kubernetes → log instructions; kubectl set image handles rollout
 	updateHandler := &update.UpdateHandler{
 		Version:    version.Version,
-		IsDocker:   isDocker,
+		Mode:       deployMode,
 		BinaryPath: os.Args[0],
 		BackupCheckFn: func() bool {
 			return !backupMgr.HasRunningBackups()
@@ -197,7 +223,12 @@ func main() {
 		taskTickerC = taskTicker.C
 	}
 
-	log.Printf("[Agent] Agent started successfully (Docker: %v)", os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv"))
+	deployModeStr := map[update.DeployMode]string{
+		update.DeployBinary:     "local binary",
+		update.DeployDocker:     "docker",
+		update.DeployKubernetes: "kubernetes",
+	}[deployMode]
+	log.Printf("[Agent] Agent started successfully (mode: %s)", deployModeStr)
 
 	for {
 		select {

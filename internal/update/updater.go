@@ -20,11 +20,23 @@ import (
 // Binaries are published here by the release.yml workflow on every tag.
 const githubReleaseBase = "https://github.com/k0wl0n/agent-backup/releases/download"
 
+// DeployMode describes how the agent was deployed.
+type DeployMode int
+
+const (
+	DeployBinary     DeployMode = iota // bare metal / VM — binary on disk
+	DeployDocker                       // Docker container with restart policy
+	DeployKubernetes                   // Kubernetes pod — image update via kubectl
+)
+
 type UpdateHandler struct {
 	Version       string
-	IsDocker      bool
+	Mode          DeployMode
 	BinaryPath    string
 	BackupCheckFn func() bool // Returns true if no backups are running
+
+	// Deprecated: use Mode instead. Kept for backwards compat.
+	IsDocker bool
 }
 
 // HandleUpdate processes an update request from the server.
@@ -60,15 +72,28 @@ func (h *UpdateHandler) HandleUpdate(ctx context.Context, targetVersion string) 
 	}
 
 UpdateReady:
-	if h.IsDocker {
+	switch h.Mode {
+	case DeployKubernetes:
+		return h.updateKubernetes(targetVersion)
+	case DeployDocker:
 		return h.updateDocker(targetVersion)
+	default:
+		if h.IsDocker {
+			return h.updateDocker(targetVersion)
+		}
+		return h.updateBinary(targetVersion)
 	}
-	return h.updateBinary(targetVersion)
 }
 
-// updateDocker handles update for Docker-based agents
+// updateDocker handles update for Docker-based agents.
+// The agent cannot pull a new image itself — it writes a flag file and exits so
+// the container restart policy (or an external tool like Watchtower) can bring
+// up the new image.  The operator must ensure the new image is available in the
+// registry before the container is restarted.
 func (h *UpdateHandler) updateDocker(targetVersion string) error {
-	log.Printf("[Update] Docker mode: writing update flag and exiting")
+	log.Printf("[Update] Docker mode: update to %s requested", targetVersion)
+	log.Printf("[Update] Writing update flag and exiting — ensure new image is available, then let Docker restart the container")
+	log.Printf("[Update] Tip: run 'docker pull <image>:%s && docker restart <container>' or use Watchtower for automatic image updates", targetVersion)
 
 	flagFile := "/var/lib/jokowipe/update-requested"
 	if err := os.MkdirAll(filepath.Dir(flagFile), 0700); err != nil {
@@ -82,6 +107,18 @@ func (h *UpdateHandler) updateDocker(targetVersion string) error {
 	log.Printf("[Update] Update flag set to %s, exiting for Docker restart...", targetVersion)
 	time.Sleep(1 * time.Second)
 	os.Exit(0)
+	return nil
+}
+
+// updateKubernetes handles update for Kubernetes-deployed agents.
+// Self-update is not supported in Kubernetes — the Deployment image must be
+// updated via kubectl (or CI/CD) which triggers a rolling restart automatically.
+// This function logs clear instructions and returns without modifying anything.
+func (h *UpdateHandler) updateKubernetes(targetVersion string) error {
+	log.Printf("[Update] Kubernetes mode: auto-update is not supported in Kubernetes")
+	log.Printf("[Update] To update to %s, run:", targetVersion)
+	log.Printf("[Update]   kubectl set image deployment/<name> agent=ghcr.io/k0wl0n/agent-backup:%s -n <namespace>", targetVersion)
+	log.Printf("[Update] Or update the image tag in your Helm values / manifests and apply.")
 	return nil
 }
 
