@@ -1,0 +1,18 @@
+apiVersion: v2
+name: jokowipe-agent
+description: JokoWipe backup agent — installs inside your Kubernetes cluster to back up databases managed by the JokoWipe platform.
+type: application
+version: 0.1.0
+appVersion: "0.1.6"
+home: https://jokowipe.id
+sources:
+  - https://github.com/k0wl0n/agent-backup
+keywords:
+  - backup
+  - database
+  - mysql
+  - postgres
+  - mongodb
+maintainers:
+  - name: k0wl0n
+    url: https://github.com/k0wl0n

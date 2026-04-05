@@ -1,0 +1,32 @@
+JokoWipe agent is running in your cluster!
+
+Check agent logs:
+  kubectl logs -l app.kubernetes.io/name=jokowipe-agent -n {{ .Release.Namespace }} -f
+
+The agent will appear online in your JokoWipe dashboard within ~15 seconds.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Upgrade to a new version
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  helm upgrade {{ .Release.Name }} oci://ghcr.io/k0wl0n/charts/jokowipe-agent \
+    --reuse-values \
+    --set image.tag=vX.Y.Z \
+    -n {{ .Release.Namespace }}
+
+The agent logs the latest available version when it receives a heartbeat from
+the platform. It cannot self-update in Kubernetes — run helm upgrade when ready.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Access databases on the host node
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if not .Values.hostNetwork }}
+hostNetwork is currently DISABLED. Your agent can reach databases inside the
+cluster via their Service DNS (e.g. mysql.default.svc.cluster.local:3306).
+
+To reach databases on the host node, reinstall with:
+  --set hostNetwork=true
+{{- else }}
+hostNetwork is ENABLED. The agent shares the host's network namespace and can
+reach services on localhost (e.g. MySQL on 127.0.0.1:3306).
+{{- end }}

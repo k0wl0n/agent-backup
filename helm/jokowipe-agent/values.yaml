@@ -1,0 +1,75 @@
+# Default values for jokowipe-agent.
+
+image:
+  repository: kowlon/jkwipe-agent
+  # Defaults to the chart's appVersion when left empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+agent:
+  # REQUIRED — your JokoWipe API key.
+  # Get it from https://app.jokowipe.id → Settings → API Keys
+  # Pass via: --set agent.apiKey=<key>  (or use existingSecret below)
+  apiKey: ""
+
+  # Override to use a pre-existing Secret containing the key "JOKOWIPE_API_KEY".
+  # When set, agent.apiKey is ignored.
+  existingSecret: ""
+
+  # Platform API URL. Override for self-hosted deployments.
+  serverUrl: https://api.jokowipe.id
+
+  # Human-readable agent name shown in the dashboard.
+  # Defaults to the pod hostname (unique per pod) when empty.
+  name: ""
+
+# Set to true if your databases run on the node's host network
+# (e.g. MySQL/Postgres installed directly on the VM, not in the cluster).
+# Incompatible with some CNI plugins. Prefer service-based access when possible.
+hostNetwork: false
+
+# Resource requests and limits for the agent container.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Backup staging directory — files are uploaded to the platform immediately
+# after creation, so only a small volume is needed.
+persistence:
+  enabled: true
+  # storageClass: ""  # Leave empty to use the cluster default
+  size: 1Gi
+  accessMode: ReadWriteOnce
+
+serviceAccount:
+  # Set to false to skip ServiceAccount creation and use the namespace default.
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Extra environment variables passed directly to the agent container.
+# Useful for advanced config (e.g. JOKOWIPE_AGENT_TYPE, telemetry settings).
+extraEnv: []
+# - name: JOKOWIPE_AGENT_TYPE
+#   value: host
