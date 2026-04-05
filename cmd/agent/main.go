@@ -72,6 +72,14 @@ func main() {
 		log.Fatalf("[Agent] Failed to load config: %v", err)
 	}
 
+	// Warn if the config file is readable by group/other — it contains the API key.
+	// On Unix this is a security misconfiguration; recommend 0600.
+	if info, err := os.Stat(*configPath); err == nil {
+		if info.Mode().Perm()&0o077 != 0 {
+			log.Printf("[Agent] WARNING: config file %s has permissions %s — should be 0600 (readable only by owner). Your API key may be exposed.", *configPath, info.Mode().Perm())
+		}
+	}
+
 	// If running in Docker without a config file, ensure we have defaults
 	if cfg.Agent.Type == "" {
 		cfg.Agent.Type = "host"
@@ -110,7 +118,8 @@ func main() {
 	// Redirect log output to file if configured (when running as a daemon via the jw CLI
 	// this is handled by the CLI wrapper instead; here we handle the direct-run case).
 	if cfg.Agent.LogFile != "" {
-		f, err := os.OpenFile(cfg.Agent.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		// 0600: log file contains S3 paths, task IDs, and DB connection info
+		f, err := os.OpenFile(cfg.Agent.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			log.Printf("[Agent] Warning: cannot open log file %s: %v — logging to stdout", cfg.Agent.LogFile, err)
 		} else {

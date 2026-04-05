@@ -132,6 +132,19 @@ func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
 		return
 	}
 
+	// Allowlist known task types — reject anything unexpected so a compromised
+	// backend cannot trigger unknown code paths via a crafted task payload.
+	switch t.Type {
+	case "test_connection", "backup_database":
+		// allowed
+	default:
+		log.Printf("[BackupManager] ExecuteTask: unknown task type %q for task %s — rejecting", t.Type, t.ID)
+		if submitErr := bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("unknown task type: %q", t.Type), 0, 0); submitErr != nil {
+			log.Printf("[BackupManager] ExecuteTask: failed to submit rejection for task %s: %v", t.ID, submitErr)
+		}
+		return
+	}
+
 	if t.Type == "test_connection" {
 		bm.executeTestConnection(ctx, t)
 		return
@@ -144,6 +157,19 @@ func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
 			log.Printf("[BackupManager] ExecuteTask: failed to submit parse error for task %s: %v", t.ID, submitErr)
 		}
 		return
+	}
+
+	// Validate the platform presigned URL before executing the backup.
+	// This is an SSRF guard: prevents a compromised backend from redirecting
+	// the agent's upload to internal services or the AWS metadata endpoint.
+	if def.PlatformUploadURL != "" {
+		if err := client.ValidateUploadURL(def.PlatformUploadURL); err != nil {
+			log.Printf("[BackupManager] ExecuteTask: unsafe upload URL in task %s: %v", t.ID, err)
+			if submitErr := bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("upload URL validation failed: %v", err), 0, 0); submitErr != nil {
+				log.Printf("[BackupManager] ExecuteTask: failed to submit URL error for task %s: %v", t.ID, submitErr)
+			}
+			return
+		}
 	}
 
 	logFn := func(level, component, message string) {
@@ -263,7 +289,7 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 	}
 	// If the path requires root (Linux system paths), test write access and fall back if denied
 	if filepath.IsAbs(backupDir) {
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
+		if err := os.MkdirAll(backupDir, 0700); err != nil {
 			backupDir = "backups"
 		}
 	}
@@ -280,7 +306,7 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 	if def.Compression {
 		logFn("info", "Compressor", "Compression enabled")
 	}
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create backups dir: %w", err)
 	}
 

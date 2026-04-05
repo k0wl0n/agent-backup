@@ -3,15 +3,54 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/sony/gobreaker/v2"
 )
+
+// maxResponseBytes caps how much data we read from the control-plane.
+// Prevents a malicious/compromised server from OOM-ing the agent via a huge task payload.
+const maxResponseBytes = 4 * 1024 * 1024 // 4 MB
+
+// allowedUploadHosts is the set of hostname suffixes the agent will PUT backups to.
+// This prevents SSRF: a compromised backend cannot redirect uploads to internal
+// services (e.g. AWS metadata endpoint, private network hosts).
+var allowedUploadHosts = []string{
+	".r2.cloudflarestorage.com",
+	".amazonaws.com",
+	".blob.core.windows.net",
+	".storage.googleapis.com",
+	"storage.googleapis.com",
+	"jokowipe.id",
+}
+
+// validateUploadURL checks that a presigned upload URL is safe to PUT data to.
+// It must be HTTPS and point to one of the known cloud storage hostnames.
+func ValidateUploadURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid upload URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("upload URL must use HTTPS (got %q)", u.Scheme)
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, allowed := range allowedUploadHosts {
+		if host == strings.TrimPrefix(allowed, ".") || strings.HasSuffix(host, allowed) {
+			return nil
+		}
+	}
+	return fmt.Errorf("upload URL host %q is not an allowed cloud storage endpoint", host)
+}
 
 type Client struct {
 	BaseURL    string
@@ -92,6 +131,11 @@ func New(baseURL, apiKey, hostname, agentType string) *Client {
 		Type:     agentType,
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+			},
 		},
 	}
 }
@@ -212,7 +256,7 @@ func (c *Client) PollTask() (*Task, error) {
 		}
 
 		var t Task
-		if err := json.NewDecoder(resp.Body).Decode(&t); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&t); err != nil {
 			return err
 		}
 		task = &t
@@ -277,7 +321,7 @@ func (c *Client) GetEncryptionKey() (string, error) {
 		var body struct {
 			EncryptionKey string `json:"encryption_key"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&body); err != nil {
 			return err
 		}
 		key = body.EncryptionKey
