@@ -3,9 +3,6 @@
 # Usage:  curl -fsSL https://raw.githubusercontent.com/k0wl0n/agent-backup/main/scripts/update.sh | bash
 set -euo pipefail
 
-# Detach from curl's stdin so background processes don't inherit the pipe
-exec </dev/null
-
 REPO="k0wl0n/agent-backup"
 INSTALL_DIR="${JOKOWIPE_BIN_DIR:-/root/.local/bin}"
 BINARY_NAME="jokowipe-agent"
