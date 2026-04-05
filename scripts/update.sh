@@ -100,9 +100,13 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
 fi
 green "Checksum verified"
 
-# ── stop running agent via PID file (no jw dependency) ───────────────────────
+# ── stop running agent (systemd or PID file) ─────────────────────────────────
 info "Stopping agent..."
-if [ -f "$AGENT_PID" ]; then
+USE_SYSTEMD=false
+if command -v systemctl &>/dev/null && systemctl is-active --quiet jokowipe-agent 2>/dev/null; then
+  USE_SYSTEMD=true
+  systemctl stop jokowipe-agent
+elif [ -f "$AGENT_PID" ]; then
   OLD_PID=$(cat "$AGENT_PID" 2>/dev/null || true)
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
     kill -TERM "$OLD_PID" 2>/dev/null || true
@@ -124,19 +128,29 @@ mv "$TMP_BIN" "$DEST"
 rm -f "$TMP_SHA"
 green "Installed ${LATEST} → ${DEST}"
 
-# ── start agent directly (no jw dependency) ───────────────────────────────────
+# ── start agent (systemd or nohup) ───────────────────────────────────────────
 info "Starting agent..."
-nohup "$DEST" \
-  --config  "$AGENT_CFG" \
-  --server  "$AGENT_SRV" \
-  >> "$AGENT_LOG" 2>&1 &
-NEW_PID=$!
-echo "$NEW_PID" > "$AGENT_PID"
-sleep 1
-if kill -0 "$NEW_PID" 2>/dev/null; then
-  green "Agent started (PID: ${NEW_PID})"
+if [ "$USE_SYSTEMD" = true ]; then
+  systemctl start jokowipe-agent
+  sleep 2
+  if systemctl is-active --quiet jokowipe-agent; then
+    green "Agent started via systemd"
+  else
+    die "Agent failed to start — check: journalctl -u jokowipe-agent -n 20"
+  fi
 else
-  die "Agent failed to start — check ${AGENT_LOG}"
+  nohup "$DEST" \
+    --config  "$AGENT_CFG" \
+    --server  "$AGENT_SRV" \
+    >> "$AGENT_LOG" 2>&1 &
+  NEW_PID=$!
+  echo "$NEW_PID" > "$AGENT_PID"
+  sleep 1
+  if kill -0 "$NEW_PID" 2>/dev/null; then
+    green "Agent started (PID: ${NEW_PID})"
+  else
+    die "Agent failed to start — check ${AGENT_LOG}"
+  fi
 fi
 
 echo
