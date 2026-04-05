@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jokowipe-agent.fullname" . }}
+  labels:
+    {{- include "jokowipe-agent.labels" . | nindent 4 }}
+spec:
+  # Single replica — the agent maintains one persistent connection to the platform.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jokowipe-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "jokowipe-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "jokowipe-agent.serviceAccountName" . }}
+      hostNetwork: {{ .Values.hostNetwork }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "jokowipe-agent.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: JOKOWIPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jokowipe-agent.secretName" . }}
+                  key: JOKOWIPE_API_KEY
+            - name: JOKOWIPE_SERVER_URL
+              value: {{ .Values.agent.serverUrl | quote }}
+            {{- if .Values.agent.name }}
+            - name: JOKOWIPE_AGENT_NAME
+              value: {{ .Values.agent.name | quote }}
+            {{- end }}
+            # K8s auto-injects KUBERNETES_SERVICE_HOST; the agent uses it to detect
+            # K8s mode and skip self-update (updates go through helm upgrade instead).
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: backups
+              mountPath: /var/lib/jokowipe/backups
+          # The agent has no HTTP port, so probe via process check.
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "kill -0 1"
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: backups
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "jokowipe-agent.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

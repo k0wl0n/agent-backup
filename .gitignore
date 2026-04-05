@@ -19,6 +19,10 @@ jokowipe-agent
 /agent-windows-*
 bin/
 
+# Allow the Helm chart directory (name collides with the binary pattern above)
+!helm/jokowipe-agent/
+!helm/jokowipe-agent/**
+
 # Allow cmd/agent source code but ignore binaries
 !cmd/agent/
 cmd/agent/agent
