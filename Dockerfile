@@ -51,12 +51,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# Create user and group
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+# Create user with home directory so config mounts work cleanly
+RUN groupadd -r appgroup && useradd -r -g appgroup -m -d /home/appuser appuser
 
 # Create directory for config and backups and set permissions
 RUN mkdir -p /etc/jokowipe /var/lib/jokowipe/backups && \
-    chown -R appuser:appgroup /etc/jokowipe /var/lib/jokowipe
+    chown -R appuser:appgroup /etc/jokowipe /var/lib/jokowipe /home/appuser
+
+# Default environment — works with plain `docker run -e JOKOWIPE_API_KEY=...`
+# Gateway must be enabled so the agent polls the platform for backup tasks.
+ENV JOKOWIPE_GATEWAY_ENABLED=true
 
 # Copy binary from builder
 COPY --from=builder /app/jokowipe-agent /usr/local/bin/jokowipe-agent

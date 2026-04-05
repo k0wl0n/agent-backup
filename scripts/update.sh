@@ -1,16 +1,48 @@
 #!/usr/bin/env bash
-# JokoWipe Agent — One-line updater
+# JokoWipe Agent — One-line updater (local binary only)
 # Usage:  curl -fsSL https://raw.githubusercontent.com/k0wl0n/agent-backup/main/scripts/update.sh | bash
+#
+# Docker:     docker pull kowlon/jkwipe-agent:latest && docker restart jokowipe-agent
+# Kubernetes: kubectl set image deployment/jokowipe-agent agent=kowlon/jkwipe-agent:<version>
 set -euo pipefail
+
+# ── guard: not for Docker or Kubernetes ──────────────────────────────────────
+if [ -f "/.dockerenv" ] || [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+  echo "✖  This script is for local binary installs only." >&2
+  if [ -f "/.dockerenv" ]; then
+    echo "   Docker: docker pull kowlon/jkwipe-agent:latest && docker restart jokowipe-agent" >&2
+  else
+    echo "   Kubernetes: kubectl set image deployment/jokowipe-agent agent=kowlon/jkwipe-agent:<version>" >&2
+  fi
+  exit 1
+fi
 
 REPO="k0wl0n/agent-backup"
 INSTALL_DIR="${JOKOWIPE_BIN_DIR:-/root/.local/bin}"
 BINARY_NAME="jokowipe-agent"
+CLI_YAML="${HOME}/.config/jokowipe/cli.yaml"
 
 # ── colours ───────────────────────────────────────────────────────────────────
 green()  { printf '\033[32m✔\033[0m  %s\n' "$*"; }
 info()   { printf '\033[36mℹ\033[0m  %s\n' "$*"; }
 die()    { printf '\033[31m✖\033[0m  %s\n' "$*" >&2; exit 1; }
+
+# ── read cli.yaml values (simple key: value grep, no yaml parser needed) ──────
+yaml_val() { grep -m1 "^${1}:" "$CLI_YAML" 2>/dev/null | sed 's/^[^:]*: *//' | tr -d '"' || true; }
+
+AGENT_BIN=$(yaml_val agent_bin)
+AGENT_CFG=$(yaml_val config_file)
+AGENT_LOG=$(yaml_val log_file)
+AGENT_SRV=$(yaml_val server_url)
+AGENT_PID=$(yaml_val pid_file)
+
+# Fallback defaults if cli.yaml is missing
+AGENT_BIN="${AGENT_BIN:-${INSTALL_DIR}/${BINARY_NAME}}"
+AGENT_CFG="${AGENT_CFG:-${HOME}/.config/jokowipe/agent.yaml}"
+AGENT_LOG="${AGENT_LOG:-${HOME}/jokowipe.log}"
+AGENT_SRV="${AGENT_SRV:-https://api.jokowipe.id}"
+AGENT_PID="${AGENT_PID:-${HOME}/.config/jokowipe/agent.pid}"
+DEST="${INSTALL_DIR}/${BINARY_NAME}"
 
 # ── detect OS / arch ──────────────────────────────────────────────────────────
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -35,7 +67,6 @@ LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
 
 # ── check current version ─────────────────────────────────────────────────────
 CURRENT="(not installed)"
-DEST="${INSTALL_DIR}/${BINARY_NAME}"
 if [ -f "$DEST" ]; then
   CURRENT=$("$DEST" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
 fi
@@ -69,47 +100,45 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
 fi
 green "Checksum verified"
 
-# ── stop running agent ────────────────────────────────────────────────────────
-AGENT_STOPPED=false
-if command -v jw &>/dev/null; then
-  info "Stopping agent..."
-  # timeout 15s so a hung agent never blocks the update
-  if timeout 15s jw stop 2>/dev/null; then
-    AGENT_STOPPED=true
-  else
-    # jw stop timed out or failed — kill directly via PID file
-    PID_FILE="${HOME}/.config/jokowipe/agent.pid"
-    if [ -f "$PID_FILE" ]; then
-      PID=$(cat "$PID_FILE" 2>/dev/null || true)
-      if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-        kill -TERM "$PID" 2>/dev/null || true
-        sleep 2
-        kill -KILL "$PID" 2>/dev/null || true
-      fi
-      rm -f "$PID_FILE"
-    fi
-    AGENT_STOPPED=true
+# ── stop running agent via PID file (no jw dependency) ───────────────────────
+info "Stopping agent..."
+if [ -f "$AGENT_PID" ]; then
+  OLD_PID=$(cat "$AGENT_PID" 2>/dev/null || true)
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    kill -TERM "$OLD_PID" 2>/dev/null || true
+    # wait up to 8s for clean exit
+    for _ in 1 2 3 4 5 6 7 8; do
+      kill -0 "$OLD_PID" 2>/dev/null || break
+      sleep 1
+    done
+    kill -0 "$OLD_PID" 2>/dev/null && kill -KILL "$OLD_PID" 2>/dev/null || true
   fi
+  rm -f "$AGENT_PID"
 fi
 
 # ── install ───────────────────────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR"
 chmod 755 "$TMP_BIN"
-
-# Keep a rollback copy
 [ -f "$DEST" ] && cp "$DEST" "${DEST}.backup"
-
 mv "$TMP_BIN" "$DEST"
 rm -f "$TMP_SHA"
-
 green "Installed ${LATEST} → ${DEST}"
 
-# ── restart agent ─────────────────────────────────────────────────────────────
-if $AGENT_STOPPED && command -v jw &>/dev/null; then
-  info "Restarting agent..."
-  jw start </dev/null
-  green "Agent restarted"
+# ── start agent directly (no jw dependency) ───────────────────────────────────
+info "Starting agent..."
+nohup "$DEST" \
+  --config  "$AGENT_CFG" \
+  --server  "$AGENT_SRV" \
+  >> "$AGENT_LOG" 2>&1 &
+NEW_PID=$!
+echo "$NEW_PID" > "$AGENT_PID"
+sleep 1
+if kill -0 "$NEW_PID" 2>/dev/null; then
+  green "Agent started (PID: ${NEW_PID})"
+else
+  die "Agent failed to start — check ${AGENT_LOG}"
 fi
 
 echo
-green "Update complete. Run: jw status"
+green "Update complete (${LATEST}). Run: jw status  or  tail -f ${AGENT_LOG}"
+
