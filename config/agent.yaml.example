@@ -1,0 +1,23 @@
+# Server Connection
+# server_url: "http://host.docker.internal:8080" # Passed via CLI
+api_key: "your-api-key-here"
+
+# Backup Configuration
+backup:
+  storage: "local" # or "s3", "gcs"
+  path: "/var/lib/jokowipe/backups"
+  retention_days: 7
+
+# Database Profiles (Targets to backup)
+databases:
+  local_postgres: "postgres://admin:secretpassword@postgres-target:5432/target_db?sslmode=disable"
+  local_mysql: "mysql://admin:secretpassword@mysql-target:3306/target_db"
+
+# Optional: Logging
+log_level: "info"
+
+# Telemetry (OpenTelemetry)
+telemetry:
+  enabled: false
+  endpoint: "https://in-otel.hyperdx.io/v1/traces" # or your OTLP collector
+  api_key: "YOUR_HYPERDX_API_KEY"

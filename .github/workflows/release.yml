@@ -1,0 +1,93 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build Multi-Arch Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            output: agent-linux-amd64
+          - goos: linux
+            goarch: arm64
+            output: agent-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            output: agent-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            output: agent-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            output: agent-windows-amd64.exe
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build \
+            -ldflags="-X github.com/k0wl0n/agent-backup/internal/version.Version=${{ steps.version.outputs.VERSION }} \
+                      -X github.com/k0wl0n/agent-backup/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+                      -X github.com/k0wl0n/agent-backup/internal/version.GitCommit=${{ github.sha }}" \
+            -o ${{ matrix.output }} \
+            ./cmd/agent
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./binaries
+      
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            binaries/agent-linux-amd64/agent-linux-amd64
+            binaries/agent-linux-arm64/agent-linux-arm64
+            binaries/agent-darwin-amd64/agent-darwin-amd64
+            binaries/agent-darwin-arm64/agent-darwin-arm64
+            binaries/agent-windows-amd64.exe/agent-windows-amd64.exe

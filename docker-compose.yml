@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  agent:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: jokowipe-agent
+    volumes:
+      - ./agent.yaml:/etc/jokowipe/agent.yaml:ro
+      - ./backups:/var/lib/jokowipe/backups # Local backup storage
+    command: ["--config", "/etc/jokowipe/agent.yaml"]
+    depends_on:
+      postgres-target:
+        condition: service_healthy
+      mysql-target:
+        condition: service_healthy
+    networks:
+      - jokowipe-agent-net
+    restart: unless-stopped
+
+  postgres-target:
+    image: postgres:15-alpine
+    container_name: jokowipe-postgres-target
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: target_db
+    ports:
+      - "5433:5432" # Exposed on host port 5433 to avoid conflict with local PG
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jokowipe-agent-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d target_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mysql-target:
+    image: mariadb:11
+    container_name: jokowipe-mysql-target
+    environment:
+      MYSQL_ROOT_PASSWORD: secretpassword
+      MYSQL_DATABASE: target_db
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: secretpassword
+    ports:
+      - "3307:3306" # Exposed on host port 3307 to avoid conflict with local MySQL
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - jokowipe-agent-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  jokowipe-agent-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mysql_data:

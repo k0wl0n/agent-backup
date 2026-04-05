@@ -1,0 +1,60 @@
+# Air build output
+tmp/
+
+# Dev env symlink
+.env.local
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+jokowipe-agent
+/agent
+/agent-bin
+/agent-linux
+/agent-test
+/agent-linux-*
+/agent-darwin-*
+/agent-windows-*
+bin/
+
+# Allow cmd/agent source code but ignore binaries
+!cmd/agent/
+cmd/agent/agent
+cmd/agent/agent-*
+
+# Logs
+*.log
+
+# Configuration & Secrets
+agent.yaml
+*.pem
+*.key
+.env
+.env.*
+
+# Backups (local dev)
+backups/
+
+# Go
+go.work
+go.work.sum
+
+# Test artifacts
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+
+# Archives
+*.tar.gz
+*.tar.bz2
+*.zip

@@ -1,0 +1,25 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/agent"
+  cmd = "go build -o ./tmp/agent ./cmd/agent"
+  delay = 1000
+  exclude_dir = ["tmp", "vendor", "testdata", "backups"]
+  include_ext = ["go", "local"]
+  kill_delay = "0.5s"
+  log = "tmp/build-errors.log"
+  args_bin = ["-config", "agent.local.yaml", "-server", "http://localhost:8000"]
+  rerun = false
+
+[log]
+  time = true
+
+[color]
+  build = "yellow"
+  runner = "green"
+  watcher = "cyan"
+  main = "magenta"
+
+[misc]
+  clean_on_exit = true
