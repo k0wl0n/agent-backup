@@ -29,6 +29,7 @@ cmd/agent/agent-*
 
 # Configuration & Secrets
 agent.yaml
+agent.test.yaml
 *.pem
 *.key
 .env
