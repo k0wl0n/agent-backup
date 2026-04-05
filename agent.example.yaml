@@ -1,27 +1,52 @@
+# Jokowipe Agent Example Configuration
+# Copy this file to agent.yaml and customize for your environment
+
+# Required: Agent identification and authentication
 agent:
-  name: "staging-agent-01"
-  api_key: "your-api-key-here"
-  # server_url is hardcoded (default: http://localhost:8000)
-  log_file: "agent.log"
+  name: "my-backup-agent"       # Friendly name (defaults to hostname)
+  api_key: "your-api-key-here"  # Get from https://api.jokowipe.id dashboard
+  type: "host"                  # Options: "host" or "managed-runner"
+  log_file: "agent.log"         # Optional: log to file instead of stdout
 
+# Recommended: Enable gateway mode for firewall-friendly polling
 gateway:
-  enabled: true # Enable polling mode (firewall friendly)
+  enabled: true
 
+# Storage configuration
 storage:
-  target_folder: "./backups" # Local folder to store dumps
-  retention_days: 7
-  
-  # Optional: S3 Configuration
+  target_folder: "./backups"  # Local directory to store backup files
+  retention_days: 7            # Days to keep local backups (0 = forever)
+
+  # Optional: S3-compatible storage (AWS S3, Cloudflare R2, MinIO, etc.)
   # s3:
   #   bucket: "my-backup-bucket"
   #   region: "us-east-1"
-  #   access_key_id: "..."
-  #   secret_access_key: "..."
+  #   access_key_id: "AKIAIOSFODNN7EXAMPLE"
+  #   secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  #   endpoint: "https://s3.amazonaws.com"  # Custom endpoint for R2, MinIO, etc.
 
-  # Optional: GCS Configuration
+  # Optional: Google Cloud Storage
   # gcs:
   #   credentials_file: "/path/to/service-account.json"
+  #   bucket: "my-gcs-backup-bucket"
 
-database:
-  # Default local database to backup if not specified in task
-  url: "postgres://user:pass@localhost:5432/dbname"
+  # Optional: Azure Blob Storage
+  # azure:
+  #   account_name: "mystorageaccount"
+  #   account_key: "base64-encoded-key"
+  #   container: "backups"
+
+# Optional: OpenTelemetry observability
+telemetry:
+  enabled: false
+  # endpoint: "https://otel-collector:4318"  # OTLP endpoint
+  # api_key: "your-telemetry-api-key"        # For secured collectors
+
+# Optional: Default database for local testing
+# database:
+#   url: "postgres://user:password@localhost:5432/dbname"
+
+# Optional: Multiple database profiles for manual backups
+# databases:
+#   prod-postgres: "postgres://user:pass@prod-db:5432/myapp"
+#   staging-mysql: "mysql://root:pass@staging-db:3306/myapp"

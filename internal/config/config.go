@@ -1,9 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -137,4 +139,87 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// Validate checks that required fields are present and that all configured
+// values are coherent. It returns a combined error listing every problem found.
+func (c *Config) Validate() error {
+	var errs []string
+
+	// API key — required for connecting to the control plane
+	if c.Agent.APIKey == "" {
+		errs = append(errs, "agent.api_key is required (or set JOKOWIPE_API_KEY env var)")
+	}
+
+	// Agent type — must be one of the known values when explicitly set
+	if c.Agent.Type != "" && c.Agent.Type != "host" && c.Agent.Type != "managed-runner" {
+		errs = append(errs, fmt.Sprintf("agent.type %q is invalid; must be \"host\" or \"managed-runner\"", c.Agent.Type))
+	}
+
+	// Retention days must be non-negative
+	if c.Storage.RetentionDays < 0 {
+		errs = append(errs, "storage.retention_days must be 0 (keep forever) or a positive number")
+	}
+
+	// S3 — if any S3 field is set, the minimum required fields must all be present
+	s3 := c.Storage.S3
+	if s3.Bucket != "" || s3.AccessKeyID != "" || s3.SecretAccessKey != "" {
+		var s3errs []string
+		if s3.Bucket == "" {
+			s3errs = append(s3errs, "bucket")
+		}
+		if s3.AccessKeyID == "" {
+			s3errs = append(s3errs, "access_key_id")
+		}
+		if s3.SecretAccessKey == "" {
+			s3errs = append(s3errs, "secret_access_key")
+		}
+		if s3.Region == "" && s3.Endpoint == "" {
+			s3errs = append(s3errs, "region (or endpoint for S3-compatible services)")
+		}
+		if len(s3errs) > 0 {
+			errs = append(errs, fmt.Sprintf("storage.s3 is incomplete — missing: %s", strings.Join(s3errs, ", ")))
+		}
+	}
+
+	// GCS — if configured, both fields are required
+	gcs := c.Storage.GCS
+	if gcs.Bucket != "" || gcs.CredentialsFile != "" {
+		if gcs.Bucket == "" {
+			errs = append(errs, "storage.gcs.bucket is required when gcs is configured")
+		}
+		if gcs.CredentialsFile == "" {
+			errs = append(errs, "storage.gcs.credentials_file is required when gcs is configured")
+		} else if _, err := os.Stat(gcs.CredentialsFile); os.IsNotExist(err) {
+			errs = append(errs, fmt.Sprintf("storage.gcs.credentials_file %q does not exist", gcs.CredentialsFile))
+		}
+	}
+
+	// Azure — if any Azure field is set, all three are required
+	az := c.Storage.Azure
+	if az.AccountName != "" || az.AccountKey != "" || az.Container != "" {
+		var azErrs []string
+		if az.AccountName == "" {
+			azErrs = append(azErrs, "account_name")
+		}
+		if az.AccountKey == "" {
+			azErrs = append(azErrs, "account_key")
+		}
+		if az.Container == "" {
+			azErrs = append(azErrs, "container")
+		}
+		if len(azErrs) > 0 {
+			errs = append(errs, fmt.Sprintf("storage.azure is incomplete — missing: %s", strings.Join(azErrs, ", ")))
+		}
+	}
+
+	// Telemetry — endpoint is required when telemetry is enabled
+	if c.Telemetry.Enabled && c.Telemetry.Endpoint == "" {
+		errs = append(errs, "telemetry.endpoint is required when telemetry.enabled is true")
+	}
+
+	if len(errs) > 0 {
+		return errors.New("config validation failed:\n  - " + strings.Join(errs, "\n  - "))
+	}
+	return nil
 }

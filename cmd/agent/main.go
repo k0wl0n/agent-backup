@@ -102,6 +102,23 @@ func main() {
 		*serverURL = envServerURL
 	}
 
+	// Validate configuration after all overrides are applied
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("[Agent] %v", err)
+	}
+
+	// Redirect log output to file if configured (when running as a daemon via the jw CLI
+	// this is handled by the CLI wrapper instead; here we handle the direct-run case).
+	if cfg.Agent.LogFile != "" {
+		f, err := os.OpenFile(cfg.Agent.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			log.Printf("[Agent] Warning: cannot open log file %s: %v — logging to stdout", cfg.Agent.LogFile, err)
+		} else {
+			log.SetOutput(f)
+			defer f.Close()
+		}
+	}
+
 	// Initialize telemetry if configured
 	if cfg.Telemetry.Enabled {
 		shutdown, err := telemetry.InitTelemetry(context.Background(), "jokowipe-agent", version.Version, cfg.Telemetry.Endpoint, cfg.Telemetry.APIKey)
