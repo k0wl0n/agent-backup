@@ -99,19 +99,49 @@ storage:
 YAML
   green "Created $CONFIG_FILE"
 else
-  # Update or insert api_key in existing file
-  if grep -q 'api_key' "$CONFIG_FILE"; then
-    # Replace existing api_key line under [agent] section
-    python3 - <<PY 2>/dev/null || sed -i "s|api_key:.*|api_key: \"${API_KEY}\"|" "$CONFIG_FILE"
-import re, sys
-content = open("$CONFIG_FILE").read()
-content = re.sub(r'(api_key\s*:).*', r'\1 "${API_KEY}"', content)
-open("$CONFIG_FILE", "w").write(content)
+  # Rewrite the file preserving indentation
+  # Use python3 to safely update nested yaml without breaking indentation
+  python3 - "$CONFIG_FILE" "$API_KEY" <<'PY'
+import sys, re
+
+path, key = sys.argv[1], sys.argv[2]
+lines = open(path).readlines()
+out = []
+in_agent = False
+replaced = False
+
+for line in lines:
+    stripped = line.lstrip()
+    indent = len(line) - len(stripped)
+
+    if re.match(r'^agent\s*:', line):
+        in_agent = True
+        out.append(line)
+        continue
+
+    if in_agent:
+        # leaving agent block when a non-indented non-empty line appears
+        if stripped and indent == 0 and not re.match(r'^#', stripped):
+            in_agent = False
+        elif re.match(r'api_key\s*:', stripped):
+            out.append(' ' * indent + 'api_key: "' + key + '"\n')
+            replaced = True
+            continue
+
+    out.append(line)
+
+if not replaced:
+    # api_key not found — inject it after "agent:" line
+    result = []
+    for line in out:
+        result.append(line)
+        if re.match(r'^agent\s*:', line):
+            result.append('  api_key: "' + key + '"\n')
+    out = result
+
+open(path, 'w').writelines(out)
+print("Updated api_key in", path)
 PY
-  else
-    # Insert api_key after "agent:" line
-    sed -i 's/^agent:/agent:\n  api_key: "'"${API_KEY}"'"/' "$CONFIG_FILE"
-  fi
   green "Updated api_key in $CONFIG_FILE"
 fi
 
