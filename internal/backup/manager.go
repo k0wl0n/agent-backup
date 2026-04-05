@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	alexzip "github.com/alexmullins/zip"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/k0wl0n/agent-backup/internal/client"
 	agentConfig "github.com/k0wl0n/agent-backup/internal/config"
@@ -453,6 +454,26 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		return nil, fmt.Errorf("failed to stat backup file: %w", err)
 	}
 
+	// Package backup into a password-protected ZIP archive if archive_password is set.
+	// The resulting .zip is compatible with 7-Zip, WinZip, and other AES-256 capable tools.
+	if def.ArchivePassword != "" {
+		logFn("info", "Archiver", "Packaging backup into password-protected ZIP (AES-256)")
+		zipPath, err := createPasswordProtectedZip(localPath, def.ArchivePassword)
+		if err != nil {
+			logFn("error", "Archiver", fmt.Sprintf("ZIP archive failed: %v", err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "zip archive failed")
+			return nil, fmt.Errorf("password-protected ZIP failed: %w", err)
+		}
+		os.Remove(localPath) // remove unarchived file
+		localPath = zipPath
+		filename = filepath.Base(zipPath)
+		if fi, err2 := os.Stat(localPath); err2 == nil {
+			fileInfo = fi
+		}
+		logFn("info", "Archiver", fmt.Sprintf("Archived → %s", filepath.Base(zipPath)))
+	}
+
 	// Encrypt backup file with AES-256-GCM if requested
 	if def.Encryption {
 		if bm.cfg.Security.EncryptionKey == "" {
@@ -626,6 +647,49 @@ func buildCmdError(tool string, err error, stderrBuf *bytes.Buffer, logFn func(l
 		return fmt.Errorf("backup command failed: %w: %s", err, stderrStr)
 	}
 	return fmt.Errorf("backup command failed: %w", err)
+}
+
+// =============================================================================
+// Password-protected ZIP archive
+// =============================================================================
+
+// createPasswordProtectedZip wraps srcPath in an AES-256 password-protected ZIP
+// file at srcPath+".zip". The archive entry uses the base filename of srcPath so
+// recipients see the original dump name after extraction.
+// Compatible with 7-Zip, WinZip, and other tools that support WinZip AES-256.
+func createPasswordProtectedZip(srcPath, password string) (string, error) {
+	zipPath := srcPath + ".zip"
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("create zip file: %w", err)
+	}
+	defer zf.Close()
+
+	zw := alexzip.NewWriter(zf)
+	defer zw.Close()
+
+	fh := &alexzip.FileHeader{
+		Name:   filepath.Base(srcPath),
+		Method: alexzip.Deflate,
+	}
+	fh.SetPassword(password)
+
+	w, err := zw.CreateHeader(fh)
+	if err != nil {
+		return "", fmt.Errorf("create zip entry: %w", err)
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("open backup file: %w", err)
+	}
+	defer src.Close()
+
+	if _, err := io.Copy(w, src); err != nil {
+		return "", fmt.Errorf("write zip entry: %w", err)
+	}
+
+	return zipPath, nil
 }
 
 // =============================================================================
