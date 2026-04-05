@@ -163,19 +163,18 @@ func main() {
 	// Check for pending update flag from previous run
 	update.ClearUpdateFlag()
 
-	// Initialize update handler (disabled to prevent infinite loops)
-	// TODO: Implement proper version-based updates instead of "latest"
-	/*
-		isDocker := os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv")
-		updateHandler := &update.UpdateHandler{
-			Version:    version.Version,
-			IsDocker:   isDocker,
-			BinaryPath: os.Args[0],
-			BackupCheckFn: func() bool {
-				return !backupMgr.HasRunningBackups()
-			},
-		}
-	*/
+	// Auto-update handler: downloads and installs a new binary when the backend
+	// sends update_version in the heartbeat response. Waits for in-flight backups
+	// to finish before replacing the binary. No-op on Docker (uses image restart).
+	isDocker := os.Getenv("DOCKER_CONTAINER") != "" || fileExists("/.dockerenv")
+	updateHandler := &update.UpdateHandler{
+		Version:    version.Version,
+		IsDocker:   isDocker,
+		BinaryPath: os.Args[0],
+		BackupCheckFn: func() bool {
+			return !backupMgr.HasRunningBackups()
+		},
+	}
 
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -212,7 +211,7 @@ func main() {
 			return
 
 		case <-heartbeatTicker.C:
-			_, err := apiClient.SendHeartbeat()
+			resp, err := apiClient.SendHeartbeat()
 			if err != nil {
 				if err == client.ErrRevoked {
 					log.Printf("[Agent] API key revoked, shutting down...")
@@ -223,23 +222,19 @@ func main() {
 				continue
 			}
 
-			// Automatic updates disabled to prevent infinite loops
-			// TODO: Implement proper version-based updates instead of "latest"
-			/*
-				// Check for update command
-				if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
-					targetVersion := *resp.UpdateVersion
-					if targetVersion != version.Version {
-						log.Printf("[Agent] Update requested: %s -> %s", version.Version, targetVersion)
-						// Trigger update in background
-						go func() {
-							if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
-								log.Printf("[Agent] Update failed: %v", err)
-							}
-						}()
-					}
+			// Trigger auto-update when the backend signals a new version.
+			// Runs in a goroutine so it doesn't block the heartbeat loop.
+			if resp != nil && resp.UpdateVersion != nil && *resp.UpdateVersion != "" {
+				targetVersion := *resp.UpdateVersion
+				if targetVersion != version.Version {
+					log.Printf("[Agent] Update available: %s -> %s", version.Version, targetVersion)
+					go func() {
+						if err := updateHandler.HandleUpdate(ctx, targetVersion); err != nil {
+							log.Printf("[Agent] Auto-update failed: %v", err)
+						}
+					}()
 				}
-			*/
+			}
 
 		case <-taskTickerC:
 			if !cfg.Gateway.Enabled {
