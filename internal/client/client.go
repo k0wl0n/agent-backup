@@ -30,6 +30,11 @@ var allowedUploadHosts = []string{
 	".blob.core.windows.net",
 	".storage.googleapis.com",
 	"storage.googleapis.com",
+	".contabostorage.com",       // Contabo Object Storage
+	".digitaloceanspaces.com",  // DigitalOcean Spaces
+	".backblazeb2.com",         // Backblaze B2
+	".linodeobjects.com",       // Linode Object Storage
+	".scw.cloud",               // Scaleway Object Storage
 	"jokowipe.id",
 }
 
