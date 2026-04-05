@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
   actions: write
+  packages: write
 
 jobs:
   build-binaries:
@@ -103,3 +104,37 @@ jobs:
             binaries/agent-darwin-arm64/agent-darwin-arm64.sha256
             binaries/agent-windows-amd64.exe/agent-windows-amd64.exe
             binaries/agent-windows-amd64.exe/agent-windows-amd64.exe.sha256
+
+  publish-helm:
+    name: Publish Helm Chart (OCI → GHCR)
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update chart version to match release
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          sed -i "s/^version:.*/version: ${VERSION}/" helm/jokowipe-agent/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" helm/jokowipe-agent/Chart.yaml
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Package and push Helm chart
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          helm package helm/jokowipe-agent --version "${VERSION}" --app-version "${VERSION}"
+          helm push "jokowipe-agent-${VERSION}.tgz" oci://ghcr.io/k0wl0n/charts
+

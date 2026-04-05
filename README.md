@@ -10,6 +10,7 @@ Open-source database backup agent for automated, encrypted backups of PostgreSQL
 - [Method 1: Create Agent from the UI (Recommended)](#method-1-create-agent-from-the-ui-recommended)
 - [Method 2: Create Agent Manually with config.yaml](#method-2-create-agent-manually-with-configyaml)
 - [Method 3: Docker](#method-3-docker)
+- [Method 4: Kubernetes (Helm)](#method-4-kubernetes-helm)
 - [Configuration Reference](#configuration-reference)
 - [Supported Databases](#supported-databases)
 - [Development](#development)
@@ -221,7 +222,6 @@ docker run -d \
   --restart unless-stopped \
   -e JOKOWIPE_API_KEY=your-api-key-here \
   -e JOKOWIPE_SERVER_URL=https://api.jokowipe.id \
-  -e JOKOWIPE_GATEWAY_ENABLED=true \
   -v /var/lib/jokowipe/backups:/var/lib/jokowipe/backups \
   kowlon/jkwipe-agent:latest
 ```
@@ -236,6 +236,64 @@ docker run -d \
   -v /var/lib/jokowipe/backups:/var/lib/jokowipe/backups \
   kowlon/jkwipe-agent:latest --config /app/agent.yaml
 ```
+
+---
+
+## Method 4: Kubernetes (Helm)
+
+Install the agent into your own Kubernetes cluster to back up databases running inside or alongside it.
+
+### Install
+
+```bash
+helm install jokowipe-agent oci://ghcr.io/k0wl0n/charts/jokowipe-agent \
+  --set agent.apiKey=your-api-key-here \
+  --create-namespace -n jokowipe
+```
+
+### Access databases on the host node
+
+If your database runs on the node itself (not as a K8s service):
+
+```bash
+helm install jokowipe-agent oci://ghcr.io/k0wl0n/charts/jokowipe-agent \
+  --set agent.apiKey=your-api-key-here \
+  --set hostNetwork=true \
+  --create-namespace -n jokowipe
+```
+
+### Access databases inside the cluster
+
+Use the Kubernetes DNS name as the host in your backup job configuration:
+
+```
+mysql.default.svc.cluster.local:3306
+postgres.default.svc.cluster.local:5432
+```
+
+### Upgrade
+
+The agent logs a `helm upgrade` command in its output whenever the platform notifies it of a new version:
+
+```bash
+helm upgrade jokowipe-agent oci://ghcr.io/k0wl0n/charts/jokowipe-agent \
+  --reuse-values \
+  --set image.tag=vX.Y.Z \
+  -n jokowipe
+```
+
+### Key values
+
+| Value | Default | Description |
+|---|---|---|
+| `agent.apiKey` | `""` | **Required.** Your JokoWipe API key |
+| `agent.serverUrl` | `https://api.jokowipe.id` | Platform API URL |
+| `agent.name` | pod hostname | Agent name shown in dashboard |
+| `agent.existingSecret` | `""` | Use a pre-existing K8s Secret for the API key |
+| `image.tag` | chart appVersion | Image tag to deploy |
+| `hostNetwork` | `false` | Share host network (to reach host databases) |
+| `persistence.enabled` | `true` | Persist backup staging dir via PVC |
+| `persistence.size` | `1Gi` | PVC size (backups upload immediately, so 1Gi is enough) |
 
 ---
 

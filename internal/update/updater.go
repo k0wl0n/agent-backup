@@ -112,13 +112,17 @@ func (h *UpdateHandler) updateDocker(targetVersion string) error {
 
 // updateKubernetes handles update for Kubernetes-deployed agents.
 // Self-update is not supported in Kubernetes — the Deployment image must be
-// updated via kubectl (or CI/CD) which triggers a rolling restart automatically.
+// updated via Helm, which triggers a rolling restart automatically.
 // This function logs clear instructions and returns without modifying anything.
 func (h *UpdateHandler) updateKubernetes(targetVersion string) error {
-	log.Printf("[Update] Kubernetes mode: auto-update is not supported in Kubernetes")
-	log.Printf("[Update] To update to %s, run:", targetVersion)
-	log.Printf("[Update]   kubectl set image deployment/<name> agent=ghcr.io/k0wl0n/agent-backup:%s -n <namespace>", targetVersion)
-	log.Printf("[Update] Or update the image tag in your Helm values / manifests and apply.")
+	tag := targetVersion
+	if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag
+	}
+	log.Printf("[Update] New version %s available (currently %s)", tag, h.Version)
+	log.Printf("[Update] Kubernetes mode: self-update is not supported — use Helm to upgrade:")
+	log.Printf("[Update]   helm upgrade jokowipe-agent oci://ghcr.io/k0wl0n/charts/jokowipe-agent \\")
+	log.Printf("[Update]     --reuse-values --set image.tag=%s", tag)
 	return nil
 }
 
