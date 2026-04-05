@@ -152,8 +152,8 @@ func (c *Config) Validate() error {
 	}
 
 	// Agent type — must be one of the known values when explicitly set
-	if c.Agent.Type != "" && c.Agent.Type != "host" && c.Agent.Type != "managed-runner" {
-		errs = append(errs, fmt.Sprintf("agent.type %q is invalid; must be \"host\" or \"managed-runner\"", c.Agent.Type))
+	if c.Agent.Type != "" && c.Agent.Type != "host" && c.Agent.Type != "managed-runner" && c.Agent.Type != "headless" {
+		errs = append(errs, fmt.Sprintf("agent.type %q is invalid; must be \"host\", \"headless\", or \"managed-runner\"", c.Agent.Type))
 	}
 
 	// Retention days must be non-negative
