@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 env:
   DOCKERHUB_USERNAME: kowlon
@@ -79,6 +80,7 @@ jobs:
 
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "::notice::Tag $TAG already exists on remote, skipping creation."
+            echo "tag_created=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -89,20 +91,35 @@ jobs:
           # Try to push the tag
           if git push origin "$TAG" 2>&1 | tee /tmp/push_output.txt; then
             echo "::notice::Created and pushed tag $TAG"
+            echo "tag_created=true" >> $GITHUB_OUTPUT
           else
             # Check if the error is due to workflow file restrictions
             if grep -q "refusing to allow.*workflow" /tmp/push_output.txt; then
               echo "::warning::Cannot auto-create tag $TAG due to workflow file changes."
               echo "::warning::Please manually create the tag: git tag $TAG && git push origin $TAG"
+              echo "tag_created=false" >> $GITHUB_OUTPUT
               exit 0
             elif git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
               echo "::notice::Tag $TAG was created by another run; continuing."
+              echo "tag_created=false" >> $GITHUB_OUTPUT
             else
               echo "::error::Failed to push tag $TAG"
               cat /tmp/push_output.txt
               exit 1
             fi
           fi
+
+      - name: Trigger release workflow for new tag
+        if: steps.semver.outputs.is_tag == 'false' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.semver.outputs.version }}"
+          # Give GitHub a moment to index the new tag
+          sleep 3
+          gh workflow run release.yml --ref "$TAG" -R ${{ github.repository }} \
+            && echo "::notice::Triggered release.yml for $TAG" \
+            || echo "::warning::Could not trigger release.yml — trigger it manually for $TAG"
 
   build:
     name: Build & Push Docker Image
