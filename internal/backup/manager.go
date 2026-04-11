@@ -374,28 +374,18 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 			return nil, fmt.Errorf("failed to create output file: %w", err)
 		}
 		defer outfile.Close()
-		// Write password to a temp .cnf file so it never appears in process args
-		// (visible via `ps aux`). The file is deleted immediately after the command.
-		myCnf, cnfErr := os.CreateTemp("", "jw-mysql-*.cnf")
-		if cnfErr != nil {
-			return nil, fmt.Errorf("failed to create temp credentials file: %w", cnfErr)
-		}
-		if err := os.Chmod(myCnf.Name(), 0600); err != nil {
-			myCnf.Close()
-			os.Remove(myCnf.Name())
-			return nil, fmt.Errorf("failed to secure temp credentials file: %w", err)
-		}
-		_, _ = fmt.Fprintf(myCnf, "[client]\npassword=\"%s\"\n", source.Password)
-		myCnf.Close()
-		defer os.Remove(myCnf.Name())
 
 		var args []string
 		if source.Database == "all" || source.Database == "" {
-			args = []string{"--defaults-extra-file=" + myCnf.Name(), "-h", source.Host, "-P", fmt.Sprintf("%d", port), "-u", source.User, "--all-databases"}
+			args = []string{"-h", source.Host, "-P", fmt.Sprintf("%d", port), "-u", source.User, "--all-databases"}
 		} else {
-			args = []string{"--defaults-extra-file=" + myCnf.Name(), "-h", source.Host, "-P", fmt.Sprintf("%d", port), "-u", source.User, source.Database}
+			args = []string{"-h", source.Host, "-P", fmt.Sprintf("%d", port), "-u", source.User, source.Database}
 		}
 		cmd := exec.CommandContext(ctx, "mysqldump", args...)
+		// Use MYSQL_PWD environment variable to pass password securely.
+		// This avoids exposing the password in process args (ps aux) and handles
+		// special characters that .cnf files can't parse (e.g., % is treated as variable placeholder).
+		cmd.Env = append(os.Environ(), "MYSQL_PWD="+source.Password)
 		cmd.Stdout = outfile
 		cmd.Stderr = &stderrBuf
 		logFn("info", "Storage", fmt.Sprintf("→ %s", localPath))
