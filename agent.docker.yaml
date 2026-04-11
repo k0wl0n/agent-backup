@@ -2,6 +2,7 @@ agent:
   # server_url: "http://backend:8000" (Passed via CLI in Docker)
   # name is intentionally omitted — falls back to container hostname (unique per container)
   api_key: "local-dev-key"
+  type: "host"
 
 temporal:
   host_port: "temporal:7233"
