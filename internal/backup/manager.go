@@ -385,7 +385,7 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 			os.Remove(myCnf.Name())
 			return nil, fmt.Errorf("failed to secure temp credentials file: %w", err)
 		}
-		_, _ = fmt.Fprintf(myCnf, "[client]\npassword=%s\n", source.Password)
+		_, _ = fmt.Fprintf(myCnf, "[client]\npassword=\"%s\"\n", source.Password)
 		myCnf.Close()
 		defer os.Remove(myCnf.Name())
 
