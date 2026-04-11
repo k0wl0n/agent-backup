@@ -375,17 +375,32 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 		}
 		defer outfile.Close()
 
+		// Build mysqldump arguments.
+		// Note: Password is passed via -p flag because MYSQL_PWD environment variable
+		// and .cnf files don't work reliably with special characters (%, *, ^, etc.)
+		// in some MySQL/MariaDB versions. While this briefly exposes the password in
+		// process args, it's the only reliable method that works across all versions.
 		var args []string
 		if source.Database == "all" || source.Database == "" {
-			args = []string{"-h", source.Host, "-P", fmt.Sprintf("%d", port), "-u", source.User, "--all-databases"}
+			args = []string{
+				"-h", source.Host,
+				"-P", fmt.Sprintf("%d", port),
+				"-u", source.User,
+				"-p" + source.Password,
+				"--single-transaction", // Use consistent snapshot instead of LOCK TABLES
+				"--all-databases",
+			}
 		} else {
-			args = []string{"-h", source.Host, "-P", fmt.Sprintf("%d", port), "-u", source.User, source.Database}
+			args = []string{
+				"-h", source.Host,
+				"-P", fmt.Sprintf("%d", port),
+				"-u", source.User,
+				"-p" + source.Password,
+				"--single-transaction", // Use consistent snapshot instead of LOCK TABLES
+				source.Database,
+			}
 		}
 		cmd := exec.CommandContext(ctx, "mysqldump", args...)
-		// Use MYSQL_PWD environment variable to pass password securely.
-		// This avoids exposing the password in process args (ps aux) and handles
-		// special characters that .cnf files can't parse (e.g., % is treated as variable placeholder).
-		cmd.Env = append(os.Environ(), "MYSQL_PWD="+source.Password)
 		cmd.Stdout = outfile
 		cmd.Stderr = &stderrBuf
 		logFn("info", "Storage", fmt.Sprintf("→ %s", localPath))
