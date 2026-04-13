@@ -169,6 +169,18 @@ func main() {
 	}
 	log.Printf("[Agent] Registered with ID: %s", apiClient.AgentID)
 
+	// Fetch encryption key from backend (platform-managed)
+	encryptionKey, err := apiClient.GetEncryptionKey()
+	if err != nil {
+		log.Printf("[Agent] Warning: Failed to fetch encryption key: %v", err)
+		log.Printf("[Agent] Backups with encryption enabled will fail until this is resolved")
+	} else if encryptionKey != "" {
+		cfg.Security.EncryptionKey = encryptionKey
+		log.Printf("[Agent] Encryption key configured (AES-256)")
+	} else {
+		log.Printf("[Agent] Encryption not available (server not configured with JOKOWIPE_SECRET_KEY)")
+	}
+
 	// Initialize backup manager (pass apiClient so ExecuteTask can submit results)
 	backupMgr := backup.New(cfg, apiClient)
 
