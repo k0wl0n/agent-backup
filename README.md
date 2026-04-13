@@ -282,6 +282,52 @@ helm upgrade jokowipe-agent oci://ghcr.io/k0wl0n/charts/jokowipe-agent \
   -n jokowipe
 ```
 
+---
+
+## Updating the Agent
+
+### Local Binary Installation
+
+To update an existing agent installation to the latest version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/k0wl0n/agent-backup/main/scripts/update.sh | bash
+```
+
+**Example output:**
+
+```
+root@vultr:~# curl -fsSL https://raw.githubusercontent.com/k0wl0n/agent-backup/main/scripts/update.sh | bash
+ℹ  Fetching latest release...
+ℹ  Current: 0.1.17   →   Latest: v0.1.24
+ℹ  Downloading agent-linux-amd64 v0.1.24...
+✔  Checksum verified
+ℹ  Stopping agent...
+✔  Installed v0.1.24 → /root/.local/bin/jokowipe-agent
+ℹ  Starting agent...
+✔  Agent started (PID: 402295)
+
+✔  Update complete (v0.1.24). Run: jw status  or  tail -f /root/jokowipe.log
+```
+
+The update script will:
+- Download the latest release from GitHub
+- Verify the SHA256 checksum
+- Stop the running agent (systemd or PID-based)
+- Replace the binary
+- Restart the agent automatically
+
+### Docker
+
+```bash
+docker pull kowlon/jkwipe-agent:latest
+docker restart jokowipe-agent
+```
+
+### Kubernetes
+
+See the [Upgrade](#upgrade) section above for Helm upgrade instructions.
+
 ### Key values
 
 | Value | Default | Description |
@@ -346,6 +392,192 @@ These override config file values — useful for Docker and CI:
 | MySQL / MariaDB | MySQL 5.7+, MariaDB 10.3+ | `mysqldump` |
 | MongoDB | 4.0+ (Atlas supported) | `mongodump` |
 | Redis | 5.0+ (ElastiCache supported) | `redis-cli` |
+
+---
+
+## Troubleshooting
+
+### Agent Fails to Start with "401 Unauthorized"
+
+**Symptom:**
+```
+[Agent] Failed to register: registration failed: 401 Unauthorized
+```
+
+**Cause:** Invalid or revoked API key.
+
+**Solution:**
+1. Verify your API key in the dashboard (Agents → View Agent → API Key)
+2. Check if you have multiple API keys configured:
+   ```bash
+   # Check config file
+   grep api_key ~/.config/jokowipe/agent.yaml
+   
+   # Check systemd override (if using systemd)
+   cat /etc/systemd/system/jokowipe-agent.service.d/api-key.conf
+   ```
+3. Update the correct API key and restart:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart jokowipe-agent
+   ```
+
+### Encryption Error: "no encryption_key configured"
+
+**Symptom:**
+```
+[ERROR][Encryptor] Encryption enabled but no encryption_key configured in agent config
+```
+
+**Cause:** Running an older agent version (< v0.1.24) that doesn't auto-fetch encryption keys.
+
+**Solution:**
+Update to the latest version:
+```bash
+curl -fsSL https://raw.githubusercontent.com/k0wl0n/agent-backup/main/scripts/update.sh | bash
+```
+
+After updating, verify the key is fetched:
+```bash
+sudo journalctl -u jokowipe-agent -n 20 | grep "Encryption key"
+# Should show: [Agent] Encryption key configured (AES-256)
+```
+
+### Backup Fails with "read-only file system"
+
+**Symptom:**
+```
+Failed: backup infrastructure error: failed to create backups dir: mkdir backups: read-only file system
+```
+
+**Cause:** No writable backup directory configured.
+
+**Solution:**
+1. Edit your config to specify a writable directory:
+   ```bash
+   nano ~/.config/jokowipe/agent.yaml
+   ```
+   
+2. Add the `target_folder`:
+   ```yaml
+   storage:
+     target_folder: "/var/lib/jokowipe/backups"
+     retention_days: 7
+   ```
+
+3. Create the directory:
+   ```bash
+   sudo mkdir -p /var/lib/jokowipe/backups
+   sudo chmod 755 /var/lib/jokowipe
+   ```
+
+4. Restart the agent:
+   ```bash
+   sudo systemctl restart jokowipe-agent
+   ```
+
+### YAML Parse Error: "mapping key already defined"
+
+**Symptom:**
+```
+yaml: unmarshal errors:
+  line 11: mapping key "storage" already defined at line 7
+```
+
+**Cause:** Duplicate keys in the YAML configuration file.
+
+**Solution:**
+Edit your config and ensure each key appears only once:
+```bash
+nano ~/.config/jokowipe/agent.yaml
+```
+
+Valid config structure:
+```yaml
+agent:
+  api_key: "your-key-here"
+  type: "host"
+  name: "my-server"
+
+storage:
+  target_folder: "/var/lib/jokowipe/backups"
+  retention_days: 7
+
+gateway:
+  enabled: true
+```
+
+### Systemd Service Keeps Restarting
+
+**Check the logs:**
+```bash
+sudo journalctl -u jokowipe-agent -n 50 --no-pager
+```
+
+Common causes:
+- **Invalid config:** Fix YAML syntax errors
+- **Wrong API key:** Update to correct key
+- **Missing permissions:** Ensure backup directory is writable
+- **Port conflict:** Another agent instance is running
+
+**Kill duplicate processes:**
+```bash
+pkill -f jokowipe-agent
+sudo systemctl start jokowipe-agent
+```
+
+### Agent Shows as Offline in Dashboard
+
+**Possible causes:**
+
+1. **Agent not running:**
+   ```bash
+   sudo systemctl status jokowipe-agent
+   ```
+
+2. **Network/firewall blocking outbound HTTPS:**
+   ```bash
+   curl -I https://api.jokowipe.id
+   ```
+
+3. **Gateway mode disabled:**
+   ```yaml
+   gateway:
+     enabled: true  # Must be true for polling mode
+   ```
+
+4. **Check heartbeat logs:**
+   ```bash
+   sudo journalctl -u jokowipe-agent -f | grep heartbeat
+   ```
+
+### Database Connection Fails
+
+**PostgreSQL:**
+```bash
+# Test connection manually
+psql -h localhost -U username -d dbname
+```
+
+**MySQL:**
+```bash
+# Test connection manually
+mysql -h localhost -u username -p dbname
+```
+
+**MongoDB:**
+```bash
+# Test connection manually
+mongosh "mongodb://username:password@localhost:27017/dbname"
+```
+
+**Redis:**
+```bash
+# Test connection manually
+redis-cli -h localhost -p 6379 ping
+```
+
+Ensure the database user has appropriate permissions and the agent can reach the database host.
 
 ---
 
