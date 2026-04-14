@@ -5,6 +5,7 @@ go 1.25.3
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/sony/gobreaker/v2 v2.4.0
+	github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9
 	go.opentelemetry.io/otel v1.40.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.40.0
 	go.opentelemetry.io/otel/sdk v1.40.0
@@ -13,7 +14,6 @@ require (
 )
 
 require (
-	github.com/alexmullins/zip v0.0.0-20180717182244-4affb64b04d0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

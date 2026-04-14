@@ -28,10 +28,10 @@ import (
 	"sync"
 	"time"
 
-	alexzip "github.com/alexmullins/zip"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/k0wl0n/agent-backup/internal/client"
 	agentConfig "github.com/k0wl0n/agent-backup/internal/config"
+	"github.com/yeka/zip"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -687,7 +687,7 @@ func buildCmdError(tool string, err error, stderrBuf *bytes.Buffer, logFn func(l
 // createPasswordProtectedZip wraps srcPath in an AES-256 password-protected ZIP
 // file at srcPath+".zip". The archive entry uses the base filename of srcPath so
 // recipients see the original dump name after extraction.
-// Compatible with 7-Zip, WinZip, and other tools that support WinZip AES-256.
+// Compatible with 7-Zip, WinZip, The Unarchiver, and all modern extraction tools.
 func createPasswordProtectedZip(srcPath, password string) (string, error) {
 	zipPath := srcPath + ".zip"
 	zf, err := os.Create(zipPath)
@@ -696,14 +696,15 @@ func createPasswordProtectedZip(srcPath, password string) (string, error) {
 	}
 	defer zf.Close()
 
-	zw := alexzip.NewWriter(zf)
+	zw := zip.NewWriter(zf)
 	defer zw.Close()
 
-	fh := &alexzip.FileHeader{
+	fh := &zip.FileHeader{
 		Name:   filepath.Base(srcPath),
-		Method: alexzip.Deflate,
+		Method: zip.Deflate,
 	}
 	fh.SetPassword(password)
+	fh.SetEncryptionMethod(zip.AES256Encryption)
 
 	w, err := zw.CreateHeader(fh)
 	if err != nil {
