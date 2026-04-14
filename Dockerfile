@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM debian:bookworm-slim
 
 # Install backup tool dependencies:
-#   postgresql-client-16 → pg_dump v16 (from PGDG; matches server version 16.x)
+#   postgresql-client-17 → pg_dump v17 (from PGDG; matches server version 17.x)
 #   mariadb-client       → mysqldump (MySQL, MariaDB)
 #   redis-tools          → redis-cli --rdb (Redis)
 #   gnupg / curl         → required to add PGDG and MongoDB APT repos
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
        | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
     && apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client-16 \
+    postgresql-client-17 \
     mariadb-client \
     redis-tools \
     mongodb-database-tools \
