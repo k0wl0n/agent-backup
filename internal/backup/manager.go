@@ -687,7 +687,7 @@ func buildCmdError(tool string, err error, stderrBuf *bytes.Buffer, logFn func(l
 // createPasswordProtectedZip wraps srcPath in an AES-256 password-protected ZIP
 // file at srcPath+".zip". The archive entry uses the base filename of srcPath so
 // recipients see the original dump name after extraction.
-// Compatible with 7-Zip, WinZip, The Unarchiver, and all modern extraction tools.
+// Compatible with 7-Zip, WinZip, Windows Explorer, and other tools that support WinZip AES-256.
 func createPasswordProtectedZip(srcPath, password string) (string, error) {
 	zipPath := srcPath + ".zip"
 	zf, err := os.Create(zipPath)
