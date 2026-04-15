@@ -1,0 +1,61 @@
+# Build Stage
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build arguments for version information
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
+ARG GIT_COMMIT=unknown
+
+# Build for Linux AMD64 by default with version information injected via ldflags
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-X github.com/k0wl0n/agent-backup/internal/version.Version=${VERSION} \
+              -X github.com/k0wl0n/agent-backup/internal/version.BuildTime=${BUILD_TIME} \
+              -X github.com/k0wl0n/agent-backup/internal/version.GitCommit=${GIT_COMMIT} \
+              -s -w" \
+    -o /app/jokowipe-agent ./cmd/agent
+
+# Runtime Stage - Minimal Alpine with just essential tools
+FROM alpine:3.19
+
+# Install database backup tools
+RUN apk add --no-cache \
+    ca-certificates \
+    zip \
+    && rm -rf /var/cache/apk/*
+
+# Install database tools from community repository
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories \
+    && apk add --no-cache \
+    postgresql-client \
+    mariadb-client \
+    redis \
+    && rm -rf /var/cache/apk/*
+
+# Install MongoDB tools from edge repository
+RUN apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing \
+    mongodb-tools \
+    && rm -rf /var/cache/apk/*
+
+# Create user and group
+RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+
+# Create directory for config and backups and set permissions
+RUN mkdir -p /etc/jokowipe /var/lib/jokowipe/backups && \
+    chown -R appuser:appgroup /etc/jokowipe /var/lib/jokowipe
+
+# Copy binary from builder
+COPY --from=builder /app/jokowipe-agent /usr/local/bin/jokowipe-agent
+RUN chmod +x /usr/local/bin/jokowipe-agent
+
+# Switch to non-root user
+USER appuser
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/jokowipe-agent"]
