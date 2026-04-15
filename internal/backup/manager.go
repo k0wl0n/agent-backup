@@ -51,6 +51,10 @@ type SourceConfig struct {
 	User     string `json:"user"`
 	Password string `json:"password"`
 	Database string `json:"database"`
+	// SSLMode controls PostgreSQL SSL behaviour (passed as PGSSLMODE env var).
+	// Common values: "disable", "require", "prefer", "verify-ca", "verify-full".
+	// Leave empty to use the pg_dump/pg_dumpall default ("prefer").
+	SSLMode string `json:"ssl_mode"`
 }
 
 // ByocStorageConfig holds decrypted BYOC storage credentials injected by the backend.
@@ -333,7 +337,11 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 				"-U", source.User,
 				"-f", localPath,
 			)
-			cmd.Env = append(os.Environ(), "PGPASSWORD="+source.Password)
+			pgEnv := append(os.Environ(), "PGPASSWORD="+source.Password)
+			if source.SSLMode != "" {
+				pgEnv = append(pgEnv, "PGSSLMODE="+source.SSLMode)
+			}
+			cmd.Env = pgEnv
 			cmd.Stderr = &stderrBuf
 			logFn("info", "Storage", fmt.Sprintf("→ %s", localPath))
 			if err := cmd.Run(); err != nil {
@@ -353,7 +361,11 @@ func (bm *BackupManager) ExecuteBackup(ctx context.Context, def BackupDefinition
 				"-F", "c",
 				"-f", localPath,
 			)
-			cmd.Env = append(os.Environ(), "PGPASSWORD="+source.Password)
+			pgEnv := append(os.Environ(), "PGPASSWORD="+source.Password)
+			if source.SSLMode != "" {
+				pgEnv = append(pgEnv, "PGSSLMODE="+source.SSLMode)
+			}
+			cmd.Env = pgEnv
 			cmd.Stderr = &stderrBuf
 			logFn("info", "Storage", fmt.Sprintf("→ %s", localPath))
 			if err := cmd.Run(); err != nil {
