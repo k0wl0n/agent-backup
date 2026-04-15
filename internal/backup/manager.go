@@ -198,8 +198,9 @@ func (bm *BackupManager) ExecuteTask(ctx context.Context, task interface{}) {
 	}
 }
 
-// executeTestConnection performs a TCP dial against the source host:port and reports
+// executeTestConnection performs a database-specific connection test and reports
 // the result back to the backend via SubmitTaskResult.
+// This validates both network connectivity AND that the correct database type is configured.
 func (bm *BackupManager) executeTestConnection(ctx context.Context, t *client.Task) {
 	var src SourceConfig
 	if err := json.Unmarshal(t.Payload, &src); err != nil {
@@ -213,18 +214,118 @@ func (bm *BackupManager) executeTestConnection(ctx context.Context, t *client.Ta
 	}
 	addr := fmt.Sprintf("%s:%d", strings.TrimSpace(src.Host), port)
 
-	log.Printf("[test_connection] dialing %s (type=%s)", addr, src.Type)
+	log.Printf("[test_connection] testing %s (type=%s)", addr, src.Type)
 
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	if err != nil {
-		log.Printf("[test_connection] failed: %v", err)
-		bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("cannot reach %s: %v", addr, err), 0, 0)
+	// Perform database-specific connection test
+	dbType := strings.ToLower(src.Type)
+	var testErr error
+
+	switch dbType {
+	case "postgres", "postgresql", "aws_rds", "supabase", "neon":
+		testErr = bm.testPostgreSQLConnection(ctx, src, port)
+	case "mysql", "mariadb":
+		testErr = bm.testMySQLConnection(ctx, src, port)
+	default:
+		// For unsupported types, fall back to TCP dial
+		log.Printf("[test_connection] unsupported type %s, using TCP dial only", src.Type)
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			testErr = err
+		} else {
+			conn.Close()
+		}
+	}
+
+	if testErr != nil {
+		log.Printf("[test_connection] failed: %v", testErr)
+		bm.client.SubmitTaskResult(t.ID, nil, fmt.Sprintf("connection test failed: %v", testErr), 0, 0)
 		return
 	}
-	conn.Close()
 
-	log.Printf("[test_connection] success: %s is reachable", addr)
+	log.Printf("[test_connection] success: %s is reachable and correct database type", addr)
 	bm.client.SubmitTaskResult(t.ID, map[string]string{"status": "ok", "addr": addr}, "", 0, 0)
+}
+
+// testPostgreSQLConnection attempts a real PostgreSQL connection using psql
+func (bm *BackupManager) testPostgreSQLConnection(ctx context.Context, src SourceConfig, port int) error {
+	// Use pg_isready for quick connection check - it's designed for this purpose
+	args := []string{
+		"-h", strings.TrimSpace(src.Host),
+		"-p", fmt.Sprintf("%d", port),
+		"-U", src.User,
+	}
+	if src.Database != "" && src.Database != "all" {
+		args = append(args, "-d", src.Database)
+	}
+
+	// Set up environment for SSL mode if specified
+	cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "pg_isready", args...)
+
+	// Set PGPASSWORD environment variable
+	env := os.Environ()
+	if src.Password != "" {
+		env = append(env, "PGPASSWORD="+src.Password)
+	}
+	if src.SSLMode != "" {
+		env = append(env, "PGSSLMODE="+src.SSLMode)
+	}
+	cmd.Env = env
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("PostgreSQL connection failed: %v (output: %s)", err, string(output))
+	}
+	return nil
+}
+
+// testMySQLConnection attempts a real MySQL connection using mysqladmin ping
+func (bm *BackupManager) testMySQLConnection(ctx context.Context, src SourceConfig, port int) error {
+	// Create temporary .cnf file for credentials (secure way to pass password to MySQL)
+	tmpFile, err := os.CreateTemp("", ".test-my.cnf-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp config: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Set restrictive permissions before writing credentials
+	if err := tmpFile.Chmod(0600); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to set temp file permissions: %v", err)
+	}
+
+	cnfContent := fmt.Sprintf("[client]\nuser=%s\npassword=%s\n", src.User, src.Password)
+	if _, err := tmpFile.WriteString(cnfContent); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to write temp config: %v", err)
+	}
+	tmpFile.Close()
+
+	// Use mysqladmin ping to test connection
+	cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	args := []string{
+		fmt.Sprintf("--defaults-file=%s", tmpFile.Name()),
+		"-h", strings.TrimSpace(src.Host),
+		"-P", fmt.Sprintf("%d", port),
+		"ping",
+	}
+
+	cmd := exec.CommandContext(cmdCtx, "mysqladmin", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("MySQL connection failed: %v (output: %s)", err, string(output))
+	}
+
+	// mysqladmin ping returns "mysqld is alive" on success
+	if !strings.Contains(string(output), "is alive") {
+		return fmt.Errorf("MySQL server not responding properly: %s", string(output))
+	}
+
+	return nil
 }
 
 // effectivePort returns the standard port for the database type if port is 0.
