@@ -50,22 +50,22 @@ RUN rm -rf /var/cache/apt/archives/*.deb /var/lib/apt/lists/* \
        zip \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
-# Install MongoDB tools (architecture-specific)
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-         curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-           | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
-         && echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
-           | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
-         && rm -rf /var/cache/apt/archives/*.deb /var/lib/apt/lists/* \
-         && apt-get update \
-         && apt-get install -y --no-install-recommends mongodb-database-tools \
-         && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \
-       elif [ "$TARGETARCH" = "arm64" ]; then \
-         MONGO_TOOLS_VERSION=100.9.4 \
-         && wget -q "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb" \
-         && dpkg -i "mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb" \
-         && rm "mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb"; \
-       fi
+# Install MongoDB tools (architecture-specific) - DISABLED for now due to ARM64 build issues
+# RUN if [ "$TARGETARCH" = "amd64" ]; then \
+#          curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
+#            | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+#          && echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+#            | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
+#          && rm -rf /var/cache/apt/archives/*.deb /var/lib/apt/lists/* \
+#          && apt-get update \
+#          && apt-get install -y --no-install-recommends mongodb-database-tools \
+#          && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \
+#        elif [ "$TARGETARCH" = "arm64" ]; then \
+#          MONGO_TOOLS_VERSION=100.9.4 \
+#          && wget -q "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb" \
+#          && dpkg -i "mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb" \
+#          && rm "mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb"; \
+#        fi
 
 # Cleanup
 RUN apt-get purge -y gnupg curl wget \
