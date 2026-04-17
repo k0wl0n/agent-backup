@@ -163,6 +163,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ needs.version.outputs.version }}
             BUILD_TIME=${{ github.event.head_commit.timestamp }}

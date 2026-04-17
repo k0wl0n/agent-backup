@@ -12,9 +12,10 @@ COPY . .
 ARG VERSION=dev
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
+ARG TARGETARCH
 
-# Build for Linux AMD64 by default with version information injected via ldflags
-RUN CGO_ENABLED=0 GOOS=linux go build \
+# Build for target architecture with version information injected via ldflags
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-X github.com/k0wl0n/agent-backup/internal/version.Version=${VERSION} \
               -X github.com/k0wl0n/agent-backup/internal/version.BuildTime=${BUILD_TIME} \
               -X github.com/k0wl0n/agent-backup/internal/version.GitCommit=${GIT_COMMIT}" \
