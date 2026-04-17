@@ -30,25 +30,34 @@ FROM debian:bookworm-slim
 #   redis-tools          → redis-cli --rdb (Redis)
 #   gnupg / curl         → required to add PGDG and MongoDB APT repos
 # Then install MongoDB Database Tools (mongodump) from official repo.
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
     curl \
+    wget \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
        | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
     && echo "deb [ signed-by=/usr/share/keyrings/postgresql.gpg ] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
        | tee /etc/apt/sources.list.d/pgdg.list \
-    && curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-       | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
-    && echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
-       | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
     && apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client-17 \
     mariadb-client \
     redis-tools \
-    mongodb-database-tools \
     zip \
-    && apt-get purge -y gnupg curl \
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+         curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
+           | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+         && echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+           | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
+         && apt-get update && apt-get install -y --no-install-recommends mongodb-database-tools; \
+       elif [ "$TARGETARCH" = "arm64" ]; then \
+         MONGO_TOOLS_VERSION=100.9.4 \
+         && wget -q "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb" \
+         && dpkg -i "mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb" \
+         && rm "mongodb-database-tools-debian12-arm64-${MONGO_TOOLS_VERSION}.deb"; \
+       fi \
+    && apt-get purge -y gnupg curl wget \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
